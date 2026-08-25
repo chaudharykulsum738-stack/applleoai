@@ -1,7 +1,6 @@
 import streamlit as st
 import cv2
 import numpy as np
-import mediapipe as mp
 from PIL import Image
 import pandas as pd
 import plotly.express as px
@@ -11,6 +10,14 @@ import requests
 import random
 from datetime import datetime
 import os
+
+# Handle optional mediapipe
+MEDIAPIPE_AVAILABLE = False
+try:
+    import mediapipe as mp
+    MEDIAPIPE_AVAILABLE = True
+except ImportError:
+    mp = None
 
 st.set_page_config(page_title="AI Hijab & Indian Outfit Stylist", page_icon="🧕", layout="wide")
 
@@ -37,55 +44,47 @@ def init_session():
             st.session_state[k] = v
 init_session()
 
+if not MEDIAPIPE_AVAILABLE:
+    st.warning("MediaPipe not installed. Face detection uses OpenCV fallback. For best results, install locally: pip install mediapipe")
+
+# ============ DATASETS ============
 OUTFIT_TEMPLATES = [
     {"id": 1, "name": "Cotton Kurti + Palazzo", "category": "daily", "occasion": "College Wear",
      "colors": ["peach", "mint", "white"], "fabrics": ["cotton", "linen"], "weather": ["summer", "spring"],
-     "modesty": 9, "budget": "low", "body_shapes": ["pear", "apple", "rectangle"],
-     "image_desc": "Pastel cotton kurti with wide palazzo pants"},
+     "modesty": 9, "budget": "low", "body_shapes": ["pear", "apple", "rectangle"]},
     {"id": 2, "name": "Silk Anarkali + Dupatta", "category": "festive", "occasion": "Wedding Guest",
      "colors": ["maroon", "gold", "emerald"], "fabrics": ["silk", "banarasi"], "weather": ["winter", "spring"],
-     "modesty": 10, "budget": "high", "body_shapes": ["hourglass", "pear", "apple"],
-     "image_desc": "Heavy silk Anarkali with embroidered dupatta"},
+     "modesty": 10, "budget": "high", "body_shapes": ["hourglass", "pear", "apple"]},
     {"id": 3, "name": "Linen Abaya + Jersey Hijab", "category": "daily", "occasion": "Office Wear",
      "colors": ["black", "navy", "beige"], "fabrics": ["linen", "jersey"], "weather": ["summer", "spring"],
-     "modesty": 10, "budget": "medium", "body_shapes": ["all"],
-     "image_desc": "Minimal linen abaya with matching jersey hijab"},
+     "modesty": 10, "budget": "medium", "body_shapes": ["all"]},
     {"id": 4, "name": "Chikankari Suit", "category": "festive", "occasion": "Eid Collection",
      "colors": ["white", "pastel pink", "sky blue"], "fabrics": ["cotton", "chikankari"], "weather": ["summer", "spring"],
-     "modesty": 9, "budget": "medium", "body_shapes": ["rectangle", "hourglass", "pear"],
-     "image_desc": "Lucknowi Chikankari white suit with delicate embroidery"},
+     "modesty": 9, "budget": "medium", "body_shapes": ["rectangle", "hourglass", "pear"]},
     {"id": 5, "name": "Velvet Sharara Set", "category": "festive", "occasion": "Nikah Outfit",
      "colors": ["burgundy", "deep green", "royal blue"], "fabrics": ["velvet", "georgette"], "weather": ["winter"],
-     "modesty": 10, "budget": "luxury", "body_shapes": ["hourglass", "rectangle"],
-     "image_desc": "Royal velvet sharara with heavy embroidery"},
+     "modesty": 10, "budget": "luxury", "body_shapes": ["hourglass", "rectangle"]},
     {"id": 6, "name": "Saree + Hijab Drape", "category": "festive", "occasion": "Reception",
      "colors": ["gold", "red", "purple"], "fabrics": ["silk", "banarasi"], "weather": ["winter", "spring"],
-     "modesty": 9, "budget": "high", "body_shapes": ["hourglass", "pear"],
-     "image_desc": "Banarasi saree with modest hijab drape style"},
+     "modesty": 9, "budget": "high", "body_shapes": ["hourglass", "pear"]},
     {"id": 7, "name": "Casual Jeans + Long Kurti", "category": "daily", "occasion": "Casual Wear",
      "colors": ["denim blue", "olive", "rust"], "fabrics": ["denim", "cotton"], "weather": ["summer", "spring", "winter"],
-     "modesty": 8, "budget": "low", "body_shapes": ["all"],
-     "image_desc": "Long kurti with jeans for casual everyday look"},
+     "modesty": 8, "budget": "low", "body_shapes": ["all"]},
     {"id": 8, "name": "Kaftan Dress", "category": "daily", "occasion": "Home Wear",
      "colors": ["beige", "grey", "pastel"], "fabrics": ["modal", "jersey"], "weather": ["summer", "spring"],
-     "modesty": 9, "budget": "low", "body_shapes": ["apple", "rectangle"],
-     "image_desc": "Flowy kaftan dress for comfortable home wear"},
+     "modesty": 9, "budget": "low", "body_shapes": ["apple", "rectangle"]},
     {"id": 9, "name": "Organza Lehenga + Hijab", "category": "festive", "occasion": "Mehendi",
      "colors": ["yellow", "green", "orange"], "fabrics": ["organza", "net"], "weather": ["summer", "spring"],
-     "modesty": 9, "budget": "high", "body_shapes": ["pear", "hourglass"],
-     "image_desc": "Light organza lehenga with matching hijab for mehendi"},
+     "modesty": 9, "budget": "high", "body_shapes": ["pear", "hourglass"]},
     {"id": 10, "name": "Pashmina Coat + Wool Hijab", "category": "daily", "occasion": "Travel Wear",
      "colors": ["coffee", "charcoal", "burgundy"], "fabrics": ["wool", "pashmina"], "weather": ["winter"],
-     "modesty": 10, "budget": "medium", "body_shapes": ["all"],
-     "image_desc": "Warm pashmina coat with woolen hijab for winter travel"},
+     "modesty": 10, "budget": "medium", "body_shapes": ["all"]},
     {"id": 11, "name": "Indo-Western Co-ord Set", "category": "daily", "occasion": "Friday Prayer Outfit",
      "colors": ["black", "white", "navy"], "fabrics": ["rayon", "georgette"], "weather": ["summer", "spring"],
-     "modesty": 9, "budget": "medium", "body_shapes": ["rectangle", "inverted_triangle"],
-     "image_desc": "Modest co-ord set with loose pants and long top"},
+     "modesty": 9, "budget": "medium", "body_shapes": ["rectangle", "inverted_triangle"]},
     {"id": 12, "name": "Bridal Abaya with Zardozi", "category": "festive", "occasion": "Nikah Outfit",
      "colors": ["gold", "ivory", "rose gold"], "fabrics": ["silk", "organza"], "weather": ["winter", "spring"],
-     "modesty": 10, "budget": "luxury", "body_shapes": ["all"],
-     "image_desc": "Bridal abaya with zardozi and pearl embroidery"},
+     "modesty": 10, "budget": "luxury", "body_shapes": ["all"]},
 ]
 
 FESTIVALS = [
@@ -139,27 +138,40 @@ ACCESSORIES = {
     "mehendi": ["Floral jewelry", "Bangles", "Potli bag", "Mojaris"],
 }
 
+# ============ AI/ML FUNCTIONS ============
 @st.cache_resource
 def get_face_detector():
-    return mp.solutions.face_detection.FaceDetection(min_detection_confidence=0.5)
+    if MEDIAPIPE_AVAILABLE and mp:
+        return mp.solutions.face_detection.FaceDetection(min_detection_confidence=0.5)
+    return None
 
 @st.cache_resource
 def get_face_mesh():
-    return mp.solutions.face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True)
+    if MEDIAPIPE_AVAILABLE and mp:
+        return mp.solutions.face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True)
+    return None
 
 def detect_face_cv(image):
-    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     detector = get_face_detector()
-    results = detector.process(rgb)
-    if results.detections:
-        detection = results.detections[0]
-        ih, iw = image.shape[:2]
-        bbox = detection.location_data.relative_bounding_box
-        x = max(0, int(bbox.xmin * iw))
-        y = max(0, int(bbox.ymin * ih))
-        w = int(bbox.width * iw)
-        h = int(bbox.height * ih)
-        return (x, y, w, h)
+    if detector is not None:
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        results = detector.process(rgb)
+        if results.detections:
+            detection = results.detections[0]
+            ih, iw = image.shape[:2]
+            bbox = detection.location_data.relative_bounding_box
+            x = max(0, int(bbox.xmin * iw))
+            y = max(0, int(bbox.ymin * ih))
+            w = int(bbox.width * iw)
+            h = int(bbox.height * ih)
+            return (x, y, w, h)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    if os.path.exists(cascade_path):
+        face_cascade = cv2.CascadeClassifier(cascade_path)
+        faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+        if len(faces) > 0:
+            return tuple(faces[0])
     return None
 
 def analyze_skin_tone(image):
@@ -184,8 +196,17 @@ def analyze_skin_tone(image):
     return "neutral"
 
 def detect_face_shape(image):
-    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     face_mesh = get_face_mesh()
+    if face_mesh is None:
+        face_box = detect_face_cv(image)
+        if face_box is None:
+            return "oval"
+        x, y, w, h = face_box
+        ratio = h / w if w > 0 else 1.0
+        if ratio > 1.4: return "long"
+        elif ratio < 1.1: return "round"
+        else: return "oval"
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     results = face_mesh.process(rgb)
     if not results.multi_face_landmarks:
         return "oval"
@@ -241,7 +262,7 @@ def get_weather_data(city, api_key):
     if not api_key:
         return {"temp": 32, "condition": "Clear", "humidity": 65, "wind": 3.5, "city": city}
     try:
-        url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}&units=metric"
+        url = "https://api.openweathermap.org/data/2.5/weather?q=" + city + "&appid=" + api_key + "&units=metric"
         r = requests.get(url, timeout=10)
         data = r.json()
         return {"temp": data["main"]["temp"], "condition": data["weather"][0]["main"],
@@ -325,24 +346,26 @@ def generate_captions(outfit_name, occasion):
     hashtags = "#ModestFashion #HijabStyle #IndianFashion #OOTD #HijabiFashion #ModestWear #FashionAI"
     return {"caption": random.choice(captions), "hashtags": hashtags}
 
+# ============ UI HELPERS ============
 def render_header(title, subtitle=""):
-    st.markdown(f'<div class="main-header">{title}</div>', unsafe_allow_html=True)
+    st.markdown("<div class=\"main-header\">" + title + "</div>", unsafe_allow_html=True)
     if subtitle:
-        st.markdown(f'<div class="sub-header">{subtitle}</div>', unsafe_allow_html=True)
+        st.markdown("<div class=\"sub-header\">" + subtitle + "</div>", unsafe_allow_html=True)
     st.divider()
 
 def render_outfit_card(template, score):
     col1, col2 = st.columns([1, 3])
     with col1:
-        st.markdown(f"<div style='height:120px;background:linear-gradient(135deg,#8B5CF6,#EC4899);border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-size:2rem;'>👗</div>", unsafe_allow_html=True)
+        st.markdown("<div style='height:120px;background:linear-gradient(135deg,#8B5CF6,#EC4899);border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-size:2rem;'>👗</div>", unsafe_allow_html=True)
     with col2:
-        st.markdown(f"**{template['name']}**")
-        st.caption(f"📌 {template['occasion']} | 💰 {template['budget'].title()}")
-        st.caption(f"🎨 {', '.join(template['colors'])} | 🧵 {', '.join(template['fabrics'])}")
+        st.markdown("**" + template["name"] + "**")
+        st.caption("📌 " + template["occasion"] + " | 💰 " + template["budget"].title())
+        st.caption("🎨 " + ", ".join(template["colors"]) + " | 🧵 " + ", ".join(template["fabrics"]))
         cls = "score-high" if score >= 75 else "score-mid" if score >= 50 else "score-low"
-        st.markdown(f'<span class="{cls}">Match: {score:.0f}%</span>', unsafe_allow_html=True)
+        st.markdown("<span class=\"" + cls + "\">Match: " + str(int(score)) + "%</span>", unsafe_allow_html=True)
         st.progress(score / 100.0)
 
+# ============ PAGES ============
 def page_home():
     render_header("🧕 AI Hijab & Indian Outfit Stylist", "Your personal AI-powered modest fashion companion")
     c1, c2, c3 = st.columns(3)
@@ -365,7 +388,7 @@ def page_home():
     for title, desc in features:
         with st.expander(title):
             st.write(desc)
-    st.info("👈 Use the sidebar to navigate between features. Start with **Profile Setup**!")
+    st.info("👈 Use the sidebar to navigate between features. Start with Profile Setup!")
 
 def page_profile():
     render_header("👤 Profile & Style Setup", "Tell us about yourself for AI-powered recommendations")
@@ -430,7 +453,7 @@ def page_recommendations():
     if not scored:
         st.info("No outfits found for this occasion.")
         return
-    st.subheader(f"Top {min(5, len(scored))} Recommendations for '{occasion.title()}'")
+    st.subheader("Top " + str(min(5, len(scored))) + " Recommendations for '" + occasion.title() + "'")
     for template, score in scored[:5]:
         render_outfit_card(template, score)
         with st.expander("👁️ View Complete Look Details"):
@@ -446,13 +469,13 @@ def page_recommendations():
                 st.markdown("**💅 Nails:** " + random.choice(["Nude", "Maroon", "Gold accent", "French tips"]))
             st.divider()
             c1, c2, c3, c4 = st.columns(4)
-            with c1: st.metric("Color Harmony", f"{min(95, int(score+5))}%")
-            with c2: st.metric("Style Score", f"{min(98, int(score+8))}%")
-            with c3: st.metric("Comfort", f"{min(96, int(score+3))}%")
-            with c4: st.metric("Modesty", f"{template['modesty']*10}%")
+            with c1: st.metric("Color Harmony", str(min(95, int(score+5))) + "%")
+            with c2: st.metric("Style Score", str(min(98, int(score+8))) + "%")
+            with c3: st.metric("Comfort", str(min(96, int(score+3))) + "%")
+            with c4: st.metric("Modesty", str(template["modesty"]*10) + "%")
             cap = generate_captions(template["name"], occasion)
-            st.code(f"{cap['caption']}
-{cap['hashtags']}", language="text")
+            caption_text = cap["caption"] + "\n" + cap["hashtags"]
+            st.code(caption_text, language="text")
             st.caption("📋 Copy this caption for Instagram!")
 
 def page_tryon():
@@ -469,17 +492,17 @@ def page_tryon():
             st.subheader("AI Analysis")
             face_box = detect_face_cv(image)
             if face_box:
-                st.success("✅ Face detected by MediaPipe AI")
+                st.success("✅ Face detected")
                 x, y, w, h = face_box
-                st.caption(f"Face region: {w}x{h}px")
+                st.caption("Face region: " + str(w) + "x" + str(h) + "px")
                 tone = analyze_skin_tone(image)
-                st.info(f"🎨 Detected Skin Tone: **{tone.title()}** undertone")
+                st.info("🎨 Detected Skin Tone: **" + tone.title() + "** undertone")
                 shape = detect_face_shape(image)
-                st.info(f"📐 Detected Face Shape: **{shape.title()}**")
+                st.info("📐 Detected Face Shape: **" + shape.title() + "**")
                 tips = {"oval": "Turkish wrap, Layered volume", "round": "Elongated styles, Side pins",
                         "square": "Soft drapes, No sharp angles", "heart": "Volume at jaw, Soft sides",
                         "long": "Width-creating wraps, Volume on sides", "diamond": "Balanced volume, Soft crown"}
-                st.caption(f"💡 Hijab tip: {tips.get(shape, 'Any style works!')}")
+                st.caption("💡 Hijab tip: " + tips.get(shape, "Any style works!"))
             else:
                 st.error("❌ No face detected. Please upload a clear front-facing photo.")
         st.divider()
@@ -489,14 +512,14 @@ def page_tryon():
         if st.button("✨ Generate Try-On", type="primary"):
             with st.spinner("AI processing your image..."):
                 result = overlay_hijab(image, selected)
-                st.image(cv2.cvtColor(result, cv2.COLOR_BGR2RGB), use_container_width=True, caption=f"Hijab Try-On: {selected.title()}")
+                st.image(cv2.cvtColor(result, cv2.COLOR_BGR2RGB), use_container_width=True, caption="Hijab Try-On: " + selected.title())
                 if st.session_state.preferences.get("skin_tone"):
                     tone = st.session_state.preferences["skin_tone"]
                     best = COLOR_HARMONY.get(tone, [])
                     if selected in best:
-                        st.success(f"✅ {selected.title()} is a perfect match for your {tone} undertone!")
+                        st.success("✅ " + selected.title() + " is a perfect match for your " + tone + " undertone!")
                     else:
-                        st.warning(f"💡 For {tone} undertone, try: {', '.join(best[:5])}")
+                        st.warning("💡 For " + tone + " undertone, try: " + ", ".join(best[:5]))
 
 def page_skin_tone():
     render_header("🎨 Skin Tone & Color Analysis", "AI-powered color harmony for your undertone")
@@ -510,7 +533,7 @@ def page_skin_tone():
         with c2:
             with st.spinner("Analyzing skin tone with K-Means clustering..."):
                 tone = analyze_skin_tone(image)
-                st.success(f"Detected Undertone: **{tone.upper()}**")
+                st.success("Detected Undertone: **" + tone.upper() + "**")
                 face_box = detect_face_cv(image)
                 if face_box:
                     x, y, w, h = face_box
@@ -532,7 +555,7 @@ def page_skin_tone():
         for i, color in enumerate(colors):
             with cols[i]:
                 hx = hex_map.get(color, "#CCCCCC")
-                st.markdown(f"<div style='width:100%;height:60px;background:{hx};border-radius:8px;border:1px solid #ddd;'></div>", unsafe_allow_html=True)
+                st.markdown("<div style='width:100%;height:60px;background:" + hx + ";border-radius:8px;border:1px solid #ddd;'></div>", unsafe_allow_html=True)
                 st.caption(color.title())
         st.divider()
         st.subheader("💄 Makeup & Jewelry Recommendations")
@@ -541,14 +564,14 @@ def page_skin_tone():
         with c1:
             st.markdown("**💋 Lipstick Shades**")
             for lip in makeup["lipstick"]:
-                st.write(f"• {lip}")
+                st.write("• " + lip)
         with c2:
             st.markdown("**👁️ Eyeshadow**")
             for eye in makeup["eyeshadow"]:
-                st.write(f"• {eye}")
+                st.write("• " + eye)
         with c3:
             st.markdown("**💍 Jewelry Metal**")
-            st.write(f"→ **{makeup['jewelry']}**")
+            st.write("→ **" + makeup["jewelry"] + "**")
             st.caption("Best metal tone for your skin")
 
 def page_weather():
@@ -565,20 +588,20 @@ def page_weather():
             rules = weather_styling_rules(weather)
             st.session_state.last_weather = weather
             c_w1, c_w2, c_w3, c_w4 = st.columns(4)
-            with c_w1: st.metric("🌡️ Temperature", f"{weather['temp']:.1f}°C")
-            with c_w2: st.metric("💧 Humidity", f"{weather['humidity']}%")
-            with c_w3: st.metric("💨 Wind", f"{weather['wind']} m/s")
-            with c_w4: st.metric("☁️ Condition", weather['condition'])
+            with c_w1: st.metric("🌡️ Temperature", str(round(weather["temp"], 1)) + "°C")
+            with c_w2: st.metric("💧 Humidity", str(weather["humidity"]) + "%")
+            with c_w3: st.metric("💨 Wind", str(weather["wind"]) + " m/s")
+            with c_w4: st.metric("☁️ Condition", weather["condition"])
             st.divider()
             st.subheader("🤖 AI Styling Recommendations")
             c_a1, c_a2 = st.columns(2)
             with c_a1:
                 st.markdown("**🧵 Recommended Fabrics**")
                 for f in rules["fabrics"]:
-                    st.write(f"• {f}")
+                    st.write("• " + f)
                 st.markdown("**🎨 Recommended Colors**")
                 for c in rules["colors"]:
-                    st.write(f"• {c}")
+                    st.write("• " + c)
             with c_a2:
                 st.markdown("**🧥 Layering**")
                 st.info(rules["layering"])
@@ -586,7 +609,7 @@ def page_weather():
                 st.write(rules["footwear"])
                 st.markdown("**🧕 Hijab Type**")
                 st.write(rules["hijab"])
-            st.warning(f"💡 **AI Note:** {rules['notes']}")
+            st.warning("💡 **AI Note:** " + rules["notes"])
             st.divider()
             st.subheader("👗 Weather-Appropriate Outfits")
             weather_prefs = st.session_state.preferences.copy() if st.session_state.preferences else {}
@@ -615,7 +638,7 @@ def page_wardrobe():
                         "color": color, "fabric": fabric, "occasion": occasion,
                         "added": datetime.now().strftime("%Y-%m-%d"), "worn": 0}
                 st.session_state.wardrobe.append(item)
-                st.success(f"Added {item_name} to wardrobe!")
+                st.success("Added " + item_name + " to wardrobe!")
     if not st.session_state.wardrobe:
         st.info("Your wardrobe is empty. Add some items above!")
         return
@@ -623,15 +646,15 @@ def page_wardrobe():
     items = st.session_state.wardrobe
     if filter_cat:
         items = [i for i in items if i["category"] in filter_cat]
-    st.subheader(f"Your Wardrobe ({len(items)} items)")
+    st.subheader("Your Wardrobe (" + str(len(items)) + " items)")
     cols = st.columns(4)
     for idx, item in enumerate(items):
         with cols[idx % 4]:
-            st.markdown(f"<div style='height:100px;background:linear-gradient(135deg,#E9D5FF,#FCE7F3);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:2rem;'>👗</div>", unsafe_allow_html=True)
-            st.markdown(f"**{item['name']}**")
-            st.caption(f"{item['category'].title()} | {item['color']} | {item['fabric']}")
-            st.caption(f"Worn: {item['worn']} times")
-            if st.button("Wear", key=f"wear_{item['id']}"):
+            st.markdown("<div style='height:100px;background:linear-gradient(135deg,#E9D5FF,#FCE7F3);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:2rem;'>👗</div>", unsafe_allow_html=True)
+            st.markdown("**" + item["name"] + "**")
+            st.caption(item["category"].title() + " | " + item["color"] + " | " + item["fabric"])
+            st.caption("Worn: " + str(item["worn"]) + " times")
+            if st.button("Wear", key="wear_" + str(item["id"])):
                 item["worn"] += 1
                 st.rerun()
     st.divider()
@@ -649,11 +672,11 @@ def page_festival():
     render_header("🎊 Festival & Occasion Planner", "AI-generated complete styling for every celebration")
     st.subheader("Upcoming Festivals")
     for fest in FESTIVALS:
-        with st.expander(f"{fest['name']} ({fest['type'].title()})"):
+        with st.expander(fest["name"] + " (" + fest["type"].title() + ")"):
             c1, c2 = st.columns([1, 2])
             with c1:
-                st.markdown(f"**Best Colors:** {', '.join(fest['colors'])}")
-                st.markdown(f"**Style:** {fest['style'].title()}")
+                st.markdown("**Best Colors:** " + ", ".join(fest["colors"]))
+                st.markdown("**Style:** " + fest["style"].title())
             with c2:
                 prefs = st.session_state.preferences
                 weather = {"temp": 28, "condition": "clear"}
@@ -662,15 +685,15 @@ def page_festival():
                     matching = [t for t in OUTFIT_TEMPLATES if t["category"] == "festive"]
                 if matching and prefs:
                     best = max(matching, key=lambda t: score_outfit(t, prefs, weather))
-                    st.markdown(f"**🎯 AI Recommended Outfit:** {best['name']}")
-                    st.caption(f"Colors: {', '.join(best['colors'])} | Fabrics: {', '.join(best['fabrics'])}")
+                    st.markdown("**🎯 AI Recommended Outfit:** " + best["name"])
+                    st.caption("Colors: " + ", ".join(best["colors"]) + " | Fabrics: " + ", ".join(best["fabrics"]))
                 else:
                     st.info("Complete your profile for AI recommendations!")
                 acc = ACCESSORIES.get(fest["type"], ACCESSORIES["daily"])
-                st.markdown(f"**💍 Accessories:** {', '.join(acc)}")
+                st.markdown("**💍 Accessories:** " + ", ".join(acc))
                 if prefs.get("skin_tone"):
                     mk = MAKEUP_GUIDE.get(prefs["skin_tone"], MAKEUP_GUIDE["neutral"])
-                    st.markdown(f"**💄 Makeup:** {mk['lipstick'][0]} lip + {mk['eyeshadow'][0]} eye")
+                    st.markdown("**💄 Makeup:** " + mk["lipstick"][0] + " lip + " + mk["eyeshadow"][0] + " eye")
     st.divider()
     st.subheader("📅 Plan Your Event")
     with st.form("event_plan"):
@@ -680,11 +703,11 @@ def page_festival():
         submitted = st.form_submit_button("Plan Event")
         if submitted:
             st.session_state.festival_events.append({"name": e_name, "date": e_date.strftime("%Y-%m-%d"), "type": e_type})
-            st.success(f"Planned {e_name}!")
+            st.success("Planned " + e_name + "!")
     if st.session_state.festival_events:
         st.subheader("Your Planned Events")
         for ev in st.session_state.festival_events:
-            st.write(f"📌 **{ev['name']}** — {ev['date']} ({ev['type']})")
+            st.write("📌 **" + ev["name"] + "** — " + ev["date"] + " (" + ev["type"] + ")")
 
 def page_body_shape():
     render_header("📐 Body Shape Outfit Stylist", "AI suggestions tailored to your silhouette")
@@ -694,16 +717,16 @@ def page_body_shape():
     advice = BODY_SHAPE_ADVICE.get(shape, {})
     c1, c2 = st.columns([1, 2])
     with c1:
-        st.markdown(f"<div style='height:200px;background:linear-gradient(135deg,#FCE7F3,#E9D5FF);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:4rem;'>👤</div>", unsafe_allow_html=True)
-        st.caption(f"Body Shape: **{shape.replace('_', ' ').title()}**")
+        st.markdown("<div style='height:200px;background:linear-gradient(135deg,#FCE7F3,#E9D5FF);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:4rem;'>👤</div>", unsafe_allow_html=True)
+        st.caption("Body Shape: **" + shape.replace("_", " ").title() + "**")
     with c2:
         st.subheader("🎯 AI Styling Advice")
-        st.markdown(f"**👗 Best Kurti Style:** {advice.get('best_kurti', 'A-line')}")
-        st.markdown(f"**💪 Sleeves:** {advice.get('sleeves', 'Full sleeves')}")
-        st.markdown(f"**👖 Bottoms:** {advice.get('bottoms', 'Palazzo')}")
-        st.markdown(f"**🚫 Avoid:** {advice.get('avoid', 'Tight fits')}")
-        st.markdown(f"**🥻 Saree Drape:** {advice.get('saree_drape', 'Nivi style')}")
-        st.markdown(f"**🧕 Hijab Tip:** {advice.get('hijab_tip', 'Any style')}")
+        st.markdown("**👗 Best Kurti Style:** " + advice.get("best_kurti", "A-line"))
+        st.markdown("**💪 Sleeves:** " + advice.get("sleeves", "Full sleeves"))
+        st.markdown("**👖 Bottoms:** " + advice.get("bottoms", "Palazzo"))
+        st.markdown("**🚫 Avoid:** " + advice.get("avoid", "Tight fits"))
+        st.markdown("**🥻 Saree Drape:** " + advice.get("saree_drape", "Nivi style"))
+        st.markdown("**🧕 Hijab Tip:** " + advice.get("hijab_tip", "Any style"))
     st.divider()
     st.subheader("👗 Recommended Outfits for Your Shape")
     matching = [t for t in OUTFIT_TEMPLATES if shape in t.get("body_shapes", []) or "all" in t.get("body_shapes", [])]
@@ -722,11 +745,11 @@ def page_mood():
         "Elegant": {"colors": ["Gold", "Ivory", "Champagne"], "style": "Silk abaya or heavy Anarkali with dupatta", "fabric": "Silk, Banarasi"},
     }
     rec = mood_outfits[mood]
-    st.markdown(f"<div style='background:#F3F4F6;border-radius:12px;padding:1.5rem;border-left:4px solid #8B5CF6;'>", unsafe_allow_html=True)
-    st.subheader(f"✨ For when you're feeling {mood}")
-    st.markdown(f"**🎨 Colors:** {', '.join(rec['colors'])}")
-    st.markdown(f"**👗 Style:** {rec['style']}")
-    st.markdown(f"**🧵 Fabrics:** {rec['fabric']}")
+    st.markdown("<div style='background:#F3F4F6;border-radius:12px;padding:1.5rem;border-left:4px solid #8B5CF6;'>", unsafe_allow_html=True)
+    st.subheader("✨ For when you're feeling " + mood)
+    st.markdown("**🎨 Colors:** " + ", ".join(rec["colors"]))
+    st.markdown("**👗 Style:** " + rec["style"])
+    st.markdown("**🧵 Fabrics:** " + rec["fabric"])
     st.markdown("</div>", unsafe_allow_html=True)
     st.divider()
     st.subheader("Outfits matching your mood")
@@ -776,18 +799,17 @@ def page_admin():
         st.session_state.admin_view = False
         st.rerun()
 
+# ============ MAIN ============
 def main():
     with st.sidebar:
         st.markdown("<h1 style='text-align:center;'>🧕 AI Stylist</h1>", unsafe_allow_html=True)
         st.markdown("<p style='text-align:center;color:#6B7280;'>Modest Fashion AI</p>", unsafe_allow_html=True)
         st.divider()
-
         page = st.radio("Navigate", [
             "🏠 Home", "👤 Profile Setup", "🎯 AI Recommendations", "🧕 Virtual Try-On",
             "🎨 Skin Tone Analysis", "🌤️ Weather Styling", "👗 Digital Wardrobe",
             "🎊 Festival Planner", "📐 Body Shape Stylist", "🎭 Mood Stylist", "📊 Admin Dashboard"
         ])
-
         st.divider()
         st.caption("🎓 B.Sc. Data Science Final Year Project")
         st.caption("Built with Streamlit + OpenCV + MediaPipe + scikit-learn")
