@@ -33,6 +33,40 @@ background: linear-gradient(90deg, #8B5CF6, #EC4899);
 </style>
 """, unsafe_allow_html=True)
 
+# ============ PRE-DEFINED WARDROBE (must be before init_session) ============
+WARDROBE_DEFAULTS = [
+    {"id": 1, "name": "Black Jersey Hijab", "category": "hijab", "color": "black", "fabric": "jersey", "occasion": "daily", "added": "2025-01-15", "worn": 12},
+    {"id": 2, "name": "Beige Chiffon Hijab", "category": "hijab", "color": "beige", "fabric": "chiffon", "occasion": "daily", "added": "2025-01-20", "worn": 8},
+    {"id": 3, "name": "Maroon Pashmina Shawl", "category": "hijab", "color": "maroon", "fabric": "pashmina", "occasion": "festive", "added": "2025-02-01", "worn": 3},
+    {"id": 4, "name": "White Cotton Kurti", "category": "kurti", "color": "white", "fabric": "cotton", "occasion": "daily", "added": "2025-01-10", "worn": 15},
+    {"id": 5, "name": "Peach A-Line Kurti", "category": "kurti", "color": "peach", "fabric": "cotton", "occasion": "college", "added": "2025-01-25", "worn": 6},
+    {"id": 6, "name": "Navy Silk Anarkali", "category": "kurti", "color": "navy", "fabric": "silk", "occasion": "festive", "added": "2025-02-10", "worn": 2},
+    {"id": 7, "name": "Black Abaya with Lace", "category": "abaya", "color": "black", "fabric": "georgette", "occasion": "daily", "added": "2025-01-12", "worn": 20},
+    {"id": 8, "name": "Grey Linen Abaya", "category": "abaya", "color": "grey", "fabric": "linen", "occasion": "office", "added": "2025-01-18", "worn": 10},
+    {"id": 9, "name": "Emerald Velvet Abaya", "category": "abaya", "color": "green", "fabric": "velvet", "occasion": "festive", "added": "2025-02-05", "worn": 1},
+    {"id": 10, "name": "White Palazzo Pants", "category": "palazzo", "color": "white", "fabric": "cotton", "occasion": "daily", "added": "2025-01-08", "worn": 18},
+    {"id": 11, "name": "Black Wide Leg Palazzo", "category": "palazzo", "color": "black", "fabric": "rayon", "occasion": "office", "added": "2025-01-22", "worn": 9},
+    {"id": 12, "name": "Gold Banarasi Saree", "category": "saree", "color": "gold", "fabric": "banarasi", "occasion": "wedding", "added": "2025-02-15", "worn": 1},
+    {"id": 13, "name": "Red Silk Saree", "category": "saree", "color": "red", "fabric": "silk", "occasion": "wedding", "added": "2025-02-12", "worn": 2},
+    {"id": 14, "name": "Pink Lehenga Skirt", "category": "lehenga", "color": "pink", "fabric": "georgette", "occasion": "festive", "added": "2025-02-20", "worn": 1},
+    {"id": 15, "name": "Yellow Mehendi Lehenga", "category": "lehenga", "color": "yellow", "fabric": "organza", "occasion": "festive", "added": "2025-02-25", "worn": 1},
+    {"id": 16, "name": "Maroon Sharara Set", "category": "sharara", "color": "maroon", "fabric": "georgette", "occasion": "festive", "added": "2025-02-08", "worn": 2},
+    {"id": 17, "name": "Ivory Gharara Pants", "category": "sharara", "color": "white", "fabric": "silk", "occasion": "wedding", "added": "2025-02-18", "worn": 1},
+    {"id": 18, "name": "Blue Denim Jeans", "category": "jeans", "color": "blue", "fabric": "denim", "occasion": "daily", "added": "2025-01-05", "worn": 25},
+    {"id": 19, "name": "Black Straight Jeans", "category": "jeans", "color": "black", "fabric": "denim", "occasion": "college", "added": "2025-01-14", "worn": 14},
+    {"id": 20, "name": "Gold Jhumka Earrings", "category": "jewelry", "color": "gold", "fabric": "metal", "occasion": "wedding", "added": "2025-02-01", "worn": 3},
+    {"id": 21, "name": "Pearl Stud Earrings", "category": "jewelry", "color": "white", "fabric": "pearl", "occasion": "office", "added": "2025-01-11", "worn": 11},
+    {"id": 22, "name": "Silver Statement Necklace", "category": "jewelry", "color": "silver", "fabric": "metal", "occasion": "party", "added": "2025-01-28", "worn": 4},
+    {"id": 23, "name": "Embroidered Potli Bag", "category": "bag", "color": "gold", "fabric": "silk", "occasion": "wedding", "added": "2025-02-10", "worn": 2},
+    {"id": 24, "name": "Black Structured Handbag", "category": "bag", "color": "black", "fabric": "leather", "occasion": "office", "added": "2025-01-16", "worn": 16},
+    {"id": 25, "name": "Beige Tote Bag", "category": "bag", "color": "beige", "fabric": "canvas", "occasion": "college", "added": "2025-01-19", "worn": 7},
+    {"id": 26, "name": "Gold Kolhapuris", "category": "shoes", "color": "gold", "fabric": "leather", "occasion": "festive", "added": "2025-02-05", "worn": 3},
+    {"id": 27, "name": "Black Block Heels", "category": "shoes", "color": "black", "fabric": "leather", "occasion": "party", "added": "2025-01-21", "worn": 5},
+    {"id": 28, "name": "White Sneakers", "category": "shoes", "color": "white", "fabric": "canvas", "occasion": "college", "added": "2025-01-09", "worn": 22},
+    {"id": 29, "name": "Red Net Dupatta", "category": "dupatta", "color": "red", "fabric": "net", "occasion": "festive", "added": "2025-02-14", "worn": 2},
+    {"id": 30, "name": "Green Chiffon Dupatta", "category": "dupatta", "color": "green", "fabric": "chiffon", "occasion": "daily", "added": "2025-01-17", "worn": 8},
+]
+
 def init_session():
     defaults = {
         "authenticated": False, "user": None, "preferences": {},
@@ -176,39 +210,6 @@ OUTFIT_TEMPLATES = [
     {"id": 42, "name": "Chikankari Anarkali + Cotton Dupatta", "category": "festive", "occasion": "Eid Collection",
      "colors": ["white", "peach", "mint green"], "fabrics": ["cotton", "chikankari"], "weather": ["summer", "spring"],
      "modesty": 9, "budget": "medium", "body_shapes": ["pear", "hourglass", "rectangle"]},
-]
-
-WARDROBE_DEFAULTS = [
-    {"id": 1, "name": "Black Jersey Hijab", "category": "hijab", "color": "black", "fabric": "jersey", "occasion": "daily", "added": "2025-01-15", "worn": 12},
-    {"id": 2, "name": "Beige Chiffon Hijab", "category": "hijab", "color": "beige", "fabric": "chiffon", "occasion": "daily", "added": "2025-01-20", "worn": 8},
-    {"id": 3, "name": "Maroon Pashmina Shawl", "category": "hijab", "color": "maroon", "fabric": "pashmina", "occasion": "festive", "added": "2025-02-01", "worn": 3},
-    {"id": 4, "name": "White Cotton Kurti", "category": "kurti", "color": "white", "fabric": "cotton", "occasion": "daily", "added": "2025-01-10", "worn": 15},
-    {"id": 5, "name": "Peach A-Line Kurti", "category": "kurti", "color": "peach", "fabric": "cotton", "occasion": "college", "added": "2025-01-25", "worn": 6},
-    {"id": 6, "name": "Navy Silk Anarkali", "category": "kurti", "color": "navy", "fabric": "silk", "occasion": "festive", "added": "2025-02-10", "worn": 2},
-    {"id": 7, "name": "Black Abaya with Lace", "category": "abaya", "color": "black", "fabric": "georgette", "occasion": "daily", "added": "2025-01-12", "worn": 20},
-    {"id": 8, "name": "Grey Linen Abaya", "category": "abaya", "color": "grey", "fabric": "linen", "occasion": "office", "added": "2025-01-18", "worn": 10},
-    {"id": 9, "name": "Emerald Velvet Abaya", "category": "abaya", "color": "green", "fabric": "velvet", "occasion": "festive", "added": "2025-02-05", "worn": 1},
-    {"id": 10, "name": "White Palazzo Pants", "category": "palazzo", "color": "white", "fabric": "cotton", "occasion": "daily", "added": "2025-01-08", "worn": 18},
-    {"id": 11, "name": "Black Wide Leg Palazzo", "category": "palazzo", "color": "black", "fabric": "rayon", "occasion": "office", "added": "2025-01-22", "worn": 9},
-    {"id": 12, "name": "Gold Banarasi Saree", "category": "saree", "color": "gold", "fabric": "banarasi", "occasion": "wedding", "added": "2025-02-15", "worn": 1},
-    {"id": 13, "name": "Red Silk Saree", "category": "saree", "color": "red", "fabric": "silk", "occasion": "wedding", "added": "2025-02-12", "worn": 2},
-    {"id": 14, "name": "Pink Lehenga Skirt", "category": "lehenga", "color": "pink", "fabric": "georgette", "occasion": "festive", "added": "2025-02-20", "worn": 1},
-    {"id": 15, "name": "Yellow Mehendi Lehenga", "category": "lehenga", "color": "yellow", "fabric": "organza", "occasion": "festive", "added": "2025-02-25", "worn": 1},
-    {"id": 16, "name": "Maroon Sharara Set", "category": "sharara", "color": "maroon", "fabric": "georgette", "occasion": "festive", "added": "2025-02-08", "worn": 2},
-    {"id": 17, "name": "Ivory Gharara Pants", "category": "sharara", "color": "white", "fabric": "silk", "occasion": "wedding", "added": "2025-02-18", "worn": 1},
-    {"id": 18, "name": "Blue Denim Jeans", "category": "jeans", "color": "blue", "fabric": "denim", "occasion": "daily", "added": "2025-01-05", "worn": 25},
-    {"id": 19, "name": "Black Straight Jeans", "category": "jeans", "color": "black", "fabric": "denim", "occasion": "college", "added": "2025-01-14", "worn": 14},
-    {"id": 20, "name": "Gold Jhumka Earrings", "category": "jewelry", "color": "gold", "fabric": "metal", "occasion": "wedding", "added": "2025-02-01", "worn": 3},
-    {"id": 21, "name": "Pearl Stud Earrings", "category": "jewelry", "color": "white", "fabric": "pearl", "occasion": "office", "added": "2025-01-11", "worn": 11},
-    {"id": 22, "name": "Silver Statement Necklace", "category": "jewelry", "color": "silver", "fabric": "metal", "occasion": "party", "added": "2025-01-28", "worn": 4},
-    {"id": 23, "name": "Embroidered Potli Bag", "category": "bag", "color": "gold", "fabric": "silk", "occasion": "wedding", "added": "2025-02-10", "worn": 2},
-    {"id": 24, "name": "Black Structured Handbag", "category": "bag", "color": "black", "fabric": "leather", "occasion": "office", "added": "2025-01-16", "worn": 16},
-    {"id": 25, "name": "Beige Tote Bag", "category": "bag", "color": "beige", "fabric": "canvas", "occasion": "college", "added": "2025-01-19", "worn": 7},
-    {"id": 26, "name": "Gold Kolhapuris", "category": "shoes", "color": "gold", "fabric": "leather", "occasion": "festive", "added": "2025-02-05", "worn": 3},
-    {"id": 27, "name": "Black Block Heels", "category": "shoes", "color": "black", "fabric": "leather", "occasion": "party", "added": "2025-01-21", "worn": 5},
-    {"id": 28, "name": "White Sneakers", "category": "shoes", "color": "white", "fabric": "canvas", "occasion": "college", "added": "2025-01-09", "worn": 22},
-    {"id": 29, "name": "Red Net Dupatta", "category": "dupatta", "color": "red", "fabric": "net", "occasion": "festive", "added": "2025-02-14", "worn": 2},
-    {"id": 30, "name": "Green Chiffon Dupatta", "category": "dupatta", "color": "green", "fabric": "chiffon", "occasion": "daily", "added": "2025-01-17", "worn": 8},
 ]
 
 FESTIVALS = [
