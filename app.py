@@ -787,7 +787,7 @@ def page_wardrobe():
     c1, c2 = st.columns(2)
     with c1:
         fig = px.pie(df, names="category", title="Items by Category", hole=0.4)
-                st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
     with c2:
         fig2 = px.bar(df.groupby("color").size().reset_index(name="count"), x="color", y="count", title="Colors in Wardrobe", color="color")
         st.plotly_chart(fig2, use_container_width=True)
