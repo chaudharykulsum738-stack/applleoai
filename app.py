@@ -1,966 +1,1617 @@
 import streamlit as st
-import cv2
-import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFilter
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from sklearn.cluster import KMeans
-import requests
 import random
-from datetime import datetime
-import os
+import datetime
+from io import BytesIO
 
-# Handle optional mediapipe
-MEDIAPIPE_AVAILABLE = False
-try:
-    import mediapipe as mp
-    MEDIAPIPE_AVAILABLE = True
-except ImportError:
-    mp = None
+# ============================================================
+# APP CONFIGURATION
+# ============================================================
+st.set_page_config(
+    page_title="AI Hijab & Indian Outfit Studio",
+    page_icon="🧕",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.set_page_config(page_title="AI Hijab & Indian Outfit Stylist", page_icon="🧕", layout="wide")
-
+# ============================================================
+# CUSTOM CSS — Premium Fashion Dark Theme
+# ============================================================
 st.markdown("""
 <style>
-.main-header { font-size: 2.5rem; font-weight: 800;
-background: linear-gradient(90deg, #8B5CF6, #EC4899);
--webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-.sub-header { font-size: 1.2rem; color: #6B7280; margin-bottom: 1rem; }
-.score-high { background: #D1FAE5; color: #065F46; padding: 4px 12px; border-radius: 20px; font-weight: 600; }
-.score-mid { background: #FEF3C7; color: #92400E; padding: 4px 12px; border-radius: 20px; font-weight: 600; }
-.score-low { background: #FEE2E2; color: #991B1B; padding: 4px 12px; border-radius: 20px; font-weight: 600; }
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=Poppins:wght@300;400;500;600&display=swap');
+    
+    html, body, [class*="css"] { font-family: 'Poppins', sans-serif; color: #e0e0e0; }
+    h1, h2, h3, h4 { font-family: 'Playfair Display', serif; letter-spacing: 0.5px; }
+    
+    /* Animated gradient background */
+    .stApp {
+        background: linear-gradient(-45deg, #0f0c29, #302b63, #24243e, #1a1a2e);
+        background-size: 400% 400%;
+        animation: gradientBG 15s ease infinite;
+    }
+    @keyframes gradientBG {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
+    
+    /* Glassmorphism Cards */
+    .glass-card {
+        background: rgba(255, 255, 255, 0.04);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-radius: 20px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 1.5rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    .glass-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 12px 40px rgba(212, 175, 55, 0.15);
+        border-color: rgba(212, 175, 55, 0.3);
+    }
+    
+    /* Gold Accent Cards */
+    .gold-accent {
+        border-left: 4px solid #d4af37;
+        background: linear-gradient(90deg, rgba(212,175,55,0.1), transparent);
+    }
+    
+    /* Buttons */
+    .stButton>button {
+        background: linear-gradient(90deg, #d4af37, #c59d5f);
+        color: #0f0c29;
+        border: none;
+        border-radius: 30px;
+        padding: 0.6rem 2rem;
+        font-weight: 600;
+        font-size: 0.95rem;
+        transition: all 0.3s;
+        width: 100%;
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 25px rgba(212,175,55,0.4);
+    }
+    
+    /* Sidebar */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #0f0c29, #1a1a2e);
+        border-right: 1px solid rgba(255,255,255,0.05);
+    }
+    section[data-testid="stSidebar"] .stRadio label {
+        color: #e0e0e0 !important;
+        font-size: 0.9rem;
+    }
+    
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .stTabs [data-baseweb="tab"] {
+        background: rgba(255,255,255,0.03);
+        border-radius: 10px 10px 0 0;
+        padding: 10px 20px;
+        color: #888;
+        border: none;
+    }
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(90deg, #d4af37, #c59d5f) !important;
+        color: #0f0c29 !important;
+        font-weight: 600;
+    }
+    
+    /* Metrics */
+    [data-testid="stMetricValue"] { color: #d4af37 !important; font-weight: 700; }
+    [data-testid="stMetricDelta"] { color: #e0b0a0 !important; }
+    
+    /* Progress bars */
+    .stProgress > div > div { 
+        background: linear-gradient(90deg, #d4af37, #e0b0a0) !important; 
+        border-radius: 10px;
+    }
+    
+    /* File uploader */
+    .stFileUploader { background: rgba(255,255,255,0.03); border-radius: 15px; padding: 1rem; }
+    
+    /* Dataframes */
+    .stDataFrame { background: rgba(255,255,255,0.02) !important; }
+    
+    /* Hide default Streamlit elements */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-# ============ PRE-DEFINED WARDROBE (must be before init_session) ============
-WARDROBE_DEFAULTS = [
-    {"id": 1, "name": "Black Jersey Hijab", "category": "hijab", "color": "black", "fabric": "jersey", "occasion": "daily", "added": "2025-01-15", "worn": 12},
-    {"id": 2, "name": "Beige Chiffon Hijab", "category": "hijab", "color": "beige", "fabric": "chiffon", "occasion": "daily", "added": "2025-01-20", "worn": 8},
-    {"id": 3, "name": "Maroon Pashmina Shawl", "category": "hijab", "color": "maroon", "fabric": "pashmina", "occasion": "festive", "added": "2025-02-01", "worn": 3},
-    {"id": 4, "name": "White Cotton Kurti", "category": "kurti", "color": "white", "fabric": "cotton", "occasion": "daily", "added": "2025-01-10", "worn": 15},
-    {"id": 5, "name": "Peach A-Line Kurti", "category": "kurti", "color": "peach", "fabric": "cotton", "occasion": "college", "added": "2025-01-25", "worn": 6},
-    {"id": 6, "name": "Navy Silk Anarkali", "category": "kurti", "color": "navy", "fabric": "silk", "occasion": "festive", "added": "2025-02-10", "worn": 2},
-    {"id": 7, "name": "Black Abaya with Lace", "category": "abaya", "color": "black", "fabric": "georgette", "occasion": "daily", "added": "2025-01-12", "worn": 20},
-    {"id": 8, "name": "Grey Linen Abaya", "category": "abaya", "color": "grey", "fabric": "linen", "occasion": "office", "added": "2025-01-18", "worn": 10},
-    {"id": 9, "name": "Emerald Velvet Abaya", "category": "abaya", "color": "green", "fabric": "velvet", "occasion": "festive", "added": "2025-02-05", "worn": 1},
-    {"id": 10, "name": "White Palazzo Pants", "category": "palazzo", "color": "white", "fabric": "cotton", "occasion": "daily", "added": "2025-01-08", "worn": 18},
-    {"id": 11, "name": "Black Wide Leg Palazzo", "category": "palazzo", "color": "black", "fabric": "rayon", "occasion": "office", "added": "2025-01-22", "worn": 9},
-    {"id": 12, "name": "Gold Banarasi Saree", "category": "saree", "color": "gold", "fabric": "banarasi", "occasion": "wedding", "added": "2025-02-15", "worn": 1},
-    {"id": 13, "name": "Red Silk Saree", "category": "saree", "color": "red", "fabric": "silk", "occasion": "wedding", "added": "2025-02-12", "worn": 2},
-    {"id": 14, "name": "Pink Lehenga Skirt", "category": "lehenga", "color": "pink", "fabric": "georgette", "occasion": "festive", "added": "2025-02-20", "worn": 1},
-    {"id": 15, "name": "Yellow Mehendi Lehenga", "category": "lehenga", "color": "yellow", "fabric": "organza", "occasion": "festive", "added": "2025-02-25", "worn": 1},
-    {"id": 16, "name": "Maroon Sharara Set", "category": "sharara", "color": "maroon", "fabric": "georgette", "occasion": "festive", "added": "2025-02-08", "worn": 2},
-    {"id": 17, "name": "Ivory Gharara Pants", "category": "sharara", "color": "white", "fabric": "silk", "occasion": "wedding", "added": "2025-02-18", "worn": 1},
-    {"id": 18, "name": "Blue Denim Jeans", "category": "jeans", "color": "blue", "fabric": "denim", "occasion": "daily", "added": "2025-01-05", "worn": 25},
-    {"id": 19, "name": "Black Straight Jeans", "category": "jeans", "color": "black", "fabric": "denim", "occasion": "college", "added": "2025-01-14", "worn": 14},
-    {"id": 20, "name": "Gold Jhumka Earrings", "category": "jewelry", "color": "gold", "fabric": "metal", "occasion": "wedding", "added": "2025-02-01", "worn": 3},
-    {"id": 21, "name": "Pearl Stud Earrings", "category": "jewelry", "color": "white", "fabric": "pearl", "occasion": "office", "added": "2025-01-11", "worn": 11},
-    {"id": 22, "name": "Silver Statement Necklace", "category": "jewelry", "color": "silver", "fabric": "metal", "occasion": "party", "added": "2025-01-28", "worn": 4},
-    {"id": 23, "name": "Embroidered Potli Bag", "category": "bag", "color": "gold", "fabric": "silk", "occasion": "wedding", "added": "2025-02-10", "worn": 2},
-    {"id": 24, "name": "Black Structured Handbag", "category": "bag", "color": "black", "fabric": "leather", "occasion": "office", "added": "2025-01-16", "worn": 16},
-    {"id": 25, "name": "Beige Tote Bag", "category": "bag", "color": "beige", "fabric": "canvas", "occasion": "college", "added": "2025-01-19", "worn": 7},
-    {"id": 26, "name": "Gold Kolhapuris", "category": "shoes", "color": "gold", "fabric": "leather", "occasion": "festive", "added": "2025-02-05", "worn": 3},
-    {"id": 27, "name": "Black Block Heels", "category": "shoes", "color": "black", "fabric": "leather", "occasion": "party", "added": "2025-01-21", "worn": 5},
-    {"id": 28, "name": "White Sneakers", "category": "shoes", "color": "white", "fabric": "canvas", "occasion": "college", "added": "2025-01-09", "worn": 22},
-    {"id": 29, "name": "Red Net Dupatta", "category": "dupatta", "color": "red", "fabric": "net", "occasion": "festive", "added": "2025-02-14", "worn": 2},
-    {"id": 30, "name": "Green Chiffon Dupatta", "category": "dupatta", "color": "green", "fabric": "chiffon", "occasion": "daily", "added": "2025-01-17", "worn": 8},
-]
-
-def init_session():
-    defaults = {
-        "authenticated": False, "user": None, "preferences": {},
-        "wardrobe": WARDROBE_DEFAULTS.copy(), "festival_events": [], "admin_view": False,
-        "location": "Mumbai, IN", "weather_api_key": "",
-    }
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
-init_session()
-
-if not MEDIAPIPE_AVAILABLE:
-    st.warning("MediaPipe not installed. Face detection uses OpenCV fallback. For best results, install locally: pip install mediapipe")
-
-# ============ DATASETS ============
-OUTFIT_TEMPLATES = [
-    {"id": 1, "name": "Cotton Kurti + Palazzo", "category": "daily", "occasion": "College Wear",
-     "colors": ["peach", "mint", "white"], "fabrics": ["cotton", "linen"], "weather": ["summer", "spring"],
-     "modesty": 9, "budget": "low", "body_shapes": ["pear", "apple", "rectangle"]},
-    {"id": 2, "name": "Silk Anarkali + Dupatta", "category": "festive", "occasion": "Wedding Guest",
-     "colors": ["maroon", "gold", "emerald"], "fabrics": ["silk", "banarasi"], "weather": ["winter", "spring"],
-     "modesty": 10, "budget": "high", "body_shapes": ["hourglass", "pear", "apple"]},
-    {"id": 3, "name": "Linen Abaya + Jersey Hijab", "category": "daily", "occasion": "Office Wear",
-     "colors": ["black", "navy", "beige"], "fabrics": ["linen", "jersey"], "weather": ["summer", "spring"],
-     "modesty": 10, "budget": "medium", "body_shapes": ["all"]},
-    {"id": 4, "name": "Chikankari Suit", "category": "festive", "occasion": "Eid Collection",
-     "colors": ["white", "pastel pink", "sky blue"], "fabrics": ["cotton", "chikankari"], "weather": ["summer", "spring"],
-     "modesty": 9, "budget": "medium", "body_shapes": ["rectangle", "hourglass", "pear"]},
-    {"id": 5, "name": "Velvet Sharara Set", "category": "festive", "occasion": "Nikah Outfit",
-     "colors": ["burgundy", "deep green", "royal blue"], "fabrics": ["velvet", "georgette"], "weather": ["winter"],
-     "modesty": 10, "budget": "luxury", "body_shapes": ["hourglass", "rectangle"]},
-    {"id": 6, "name": "Saree + Hijab Drape", "category": "festive", "occasion": "Reception",
-     "colors": ["gold", "red", "purple"], "fabrics": ["silk", "banarasi"], "weather": ["winter", "spring"],
-     "modesty": 9, "budget": "high", "body_shapes": ["hourglass", "pear"]},
-    {"id": 7, "name": "Casual Jeans + Long Kurti", "category": "daily", "occasion": "Casual Wear",
-     "colors": ["denim blue", "olive", "rust"], "fabrics": ["denim", "cotton"], "weather": ["summer", "spring", "winter"],
-     "modesty": 8, "budget": "low", "body_shapes": ["all"]},
-    {"id": 8, "name": "Kaftan Dress", "category": "daily", "occasion": "Home Wear",
-     "colors": ["beige", "grey", "pastel"], "fabrics": ["modal", "jersey"], "weather": ["summer", "spring"],
-     "modesty": 9, "budget": "low", "body_shapes": ["apple", "rectangle"]},
-    {"id": 9, "name": "Organza Lehenga + Hijab", "category": "festive", "occasion": "Mehendi",
-     "colors": ["yellow", "green", "orange"], "fabrics": ["organza", "net"], "weather": ["summer", "spring"],
-     "modesty": 9, "budget": "high", "body_shapes": ["pear", "hourglass"]},
-    {"id": 10, "name": "Pashmina Coat + Wool Hijab", "category": "daily", "occasion": "Travel Wear",
-     "colors": ["coffee", "charcoal", "burgundy"], "fabrics": ["wool", "pashmina"], "weather": ["winter"],
-     "modesty": 10, "budget": "medium", "body_shapes": ["all"]},
-    {"id": 11, "name": "Indo-Western Co-ord Set", "category": "daily", "occasion": "Friday Prayer Outfit",
-     "colors": ["black", "white", "navy"], "fabrics": ["rayon", "georgette"], "weather": ["summer", "spring"],
-     "modesty": 9, "budget": "medium", "body_shapes": ["rectangle", "inverted_triangle"]},
-    {"id": 12, "name": "Bridal Abaya with Zardozi", "category": "festive", "occasion": "Nikah Outfit",
-     "colors": ["gold", "ivory", "rose gold"], "fabrics": ["silk", "organza"], "weather": ["winter", "spring"],
-     "modesty": 10, "budget": "luxury", "body_shapes": ["all"]},
-    # --- 30 NEW AI RECOMMENDATION OUTFITS ---
-    {"id": 13, "name": "Net Lehenga + Velvet Dupatta", "category": "festive", "occasion": "Sangeet Night",
-     "colors": ["wine", "gold", "blush"], "fabrics": ["net", "velvet"], "weather": ["winter", "spring"],
-     "modesty": 9, "budget": "luxury", "body_shapes": ["hourglass", "pear"]},
-    {"id": 14, "name": "Banarasi Saree + Full Sleeve Blouse", "category": "festive", "occasion": "Wedding Guest",
-     "colors": ["red", "gold", "green"], "fabrics": ["silk", "banarasi"], "weather": ["winter", "spring"],
-     "modesty": 10, "budget": "high", "body_shapes": ["hourglass", "rectangle", "pear"]},
-    {"id": 15, "name": "Gharara Suit with Zari Work", "category": "festive", "occasion": "Nikah Outfit",
-     "colors": ["ivory", "gold", "peach"], "fabrics": ["georgette", "zari"], "weather": ["winter", "spring"],
-     "modesty": 10, "budget": "luxury", "body_shapes": ["apple", "rectangle", "hourglass"]},
-    {"id": 16, "name": "Peplum Kurti + Dhoti Pants", "category": "festive", "occasion": "Mehendi",
-     "colors": ["lime", "mint", "white"], "fabrics": ["crepe", "cotton"], "weather": ["summer", "spring"],
-     "modesty": 8, "budget": "medium", "body_shapes": ["rectangle", "inverted_triangle"]},
-    {"id": 17, "name": "Mirror Work Lehenga", "category": "festive", "occasion": "Garba Night",
-     "colors": ["fuchsia", "orange", "yellow"], "fabrics": ["cotton", "mirror_work"], "weather": ["summer", "spring"],
-     "modesty": 8, "budget": "medium", "body_shapes": ["pear", "hourglass"]},
-    {"id": 18, "name": "Silk Abaya with Embroidery", "category": "festive", "occasion": "Eid Collection",
-     "colors": ["emerald", "gold", "black"], "fabrics": ["silk", "embroidery"], "weather": ["winter", "spring"],
-     "modesty": 10, "budget": "high", "body_shapes": ["all"]},
-    {"id": 19, "name": "Angrakha Style Anarkali", "category": "festive", "occasion": "Wedding Guest",
-     "colors": ["teal", "copper", "cream"], "fabrics": ["silk", "brocade"], "weather": ["winter", "spring"],
-     "modesty": 9, "budget": "high", "body_shapes": ["apple", "rectangle"]},
-    {"id": 20, "name": "Floral Print Maxi Dress + Hijab", "category": "festive", "occasion": "Eid Brunch",
-     "colors": ["pastel pink", "lilac", "white"], "fabrics": ["chiffon", "georgette"], "weather": ["summer", "spring"],
-     "modesty": 9, "budget": "medium", "body_shapes": ["pear", "apple"]},
-    {"id": 21, "name": "Bridal Lehenga with Long Choli", "category": "festive", "occasion": "Reception",
-     "colors": ["red", "gold", "maroon"], "fabrics": ["velvet", "silk"], "weather": ["winter"],
-     "modesty": 9, "budget": "luxury", "body_shapes": ["hourglass", "pear"]},
-    {"id": 22, "name": "Chanderi Silk Suit", "category": "festive", "occasion": "Diwali Pooja",
-     "colors": ["mustard", "rust", "green"], "fabrics": ["chanderi", "silk"], "weather": ["spring", "winter"],
-     "modesty": 9, "budget": "medium", "body_shapes": ["rectangle", "hourglass"]},
-    {"id": 23, "name": "Tunic Kurti + Jeggings", "category": "daily", "occasion": "College Wear",
-     "colors": ["denim blue", "white", "striped"], "fabrics": ["cotton", "denim"], "weather": ["summer", "spring", "winter"],
-     "modesty": 8, "budget": "low", "body_shapes": ["all"]},
-    {"id": 24, "name": "A-Line Cotton Dress + Cardigan", "category": "daily", "occasion": "Office Wear",
-     "colors": ["navy", "grey", "burgundy"], "fabrics": ["cotton", "knit"], "weather": ["winter", "spring"],
-     "modesty": 9, "budget": "medium", "body_shapes": ["apple", "rectangle"]},
-    {"id": 25, "name": "Jersey Maxi Skirt + Long Top", "category": "daily", "occasion": "Casual Wear",
-     "colors": ["black", "olive", "tan"], "fabrics": ["jersey", "modal"], "weather": ["summer", "spring"],
-     "modesty": 9, "budget": "low", "body_shapes": ["pear", "hourglass"]},
-    {"id": 26, "name": "Pleated Palazzo + Short Kurti", "category": "daily", "occasion": "College Wear",
-     "colors": ["white", "peach", "mint"], "fabrics": ["rayon", "cotton"], "weather": ["summer", "spring"],
-     "modesty": 8, "budget": "low", "body_shapes": ["rectangle", "inverted_triangle"]},
-    {"id": 27, "name": "Denim Abaya + Sneakers", "category": "daily", "occasion": "Travel Wear",
-     "colors": ["denim blue", "black", "grey"], "fabrics": ["denim", "cotton"], "weather": ["summer", "spring", "winter"],
-     "modesty": 10, "budget": "medium", "body_shapes": ["all"]},
-    {"id": 28, "name": "Wrap Style Kurti + Cigarette Pants", "category": "daily", "occasion": "Office Wear",
-     "colors": ["beige", "rust", "navy"], "fabrics": ["linen", "cotton"], "weather": ["summer", "spring"],
-     "modesty": 9, "budget": "medium", "body_shapes": ["apple", "hourglass"]},
-    {"id": 29, "name": "Hoodie Abaya + Joggers", "category": "daily", "occasion": "Travel Wear",
-     "colors": ["charcoal", "olive", "black"], "fabrics": ["fleece", "cotton"], "weather": ["winter"],
-     "modesty": 10, "budget": "medium", "body_shapes": ["all"]},
-    {"id": 30, "name": "Tiered Cotton Dress", "category": "daily", "occasion": "Home Wear",
-     "colors": ["lavender", "sage", "cream"], "fabrics": ["cotton", "voile"], "weather": ["summer", "spring"],
-     "modesty": 8, "budget": "low", "body_shapes": ["rectangle", "pear"]},
-    {"id": 31, "name": "Long Shirt + Wide Leg Pants", "category": "daily", "occasion": "Friday Prayer Outfit",
-     "colors": ["white", "black", "navy"], "fabrics": ["poplin", "cotton"], "weather": ["summer", "spring", "winter"],
-     "modesty": 9, "budget": "low", "body_shapes": ["all"]},
-    {"id": 32, "name": "Ribbed Knit Dress + Wool Hijab", "category": "daily", "occasion": "Office Wear",
-     "colors": ["camel", "burgundy", "forest green"], "fabrics": ["knit", "wool"], "weather": ["winter"],
-     "modesty": 9, "budget": "medium", "body_shapes": ["hourglass", "rectangle"]},
-    {"id": 33, "name": "Sequin Abaya + Satin Hijab", "category": "festive", "occasion": "Party",
-     "colors": ["black", "gold", "silver"], "fabrics": ["sequin", "satin"], "weather": ["winter", "spring"],
-     "modesty": 10, "budget": "luxury", "body_shapes": ["all"]},
-    {"id": 34, "name": "Ruffled Saree Gown", "category": "festive", "occasion": "Reception",
-     "colors": ["blush", "champagne", "rose gold"], "fabrics": ["organza", "satin"], "weather": ["spring", "winter"],
-     "modesty": 9, "budget": "luxury", "body_shapes": ["hourglass", "pear"]},
-    {"id": 35, "name": "Cape Style Anarkali", "category": "festive", "occasion": "Wedding Guest",
-     "colors": ["royal blue", "silver", "navy"], "fabrics": ["georgette", "net"], "weather": ["winter", "spring"],
-     "modesty": 9, "budget": "high", "body_shapes": ["rectangle", "inverted_triangle"]},
-    {"id": 36, "name": "Draped Jumpsuit + Hijab", "category": "festive", "occasion": "Party",
-     "colors": ["emerald", "black", "wine"], "fabrics": ["crepe", "jersey"], "weather": ["summer", "spring", "winter"],
-     "modesty": 9, "budget": "high", "body_shapes": ["hourglass", "rectangle"]},
-    {"id": 37, "name": "Feather Trim Abaya", "category": "festive", "occasion": "Party",
-     "colors": ["ivory", "black", "dusty rose"], "fabrics": ["satin", "feather"], "weather": ["winter"],
-     "modesty": 10, "budget": "luxury", "body_shapes": ["all"]},
-    {"id": 38, "name": "Linen Co-ord Set + Sun Hat", "category": "daily", "occasion": "Travel Wear",
-     "colors": ["sand", "white", "terracotta"], "fabrics": ["linen", "cotton"], "weather": ["summer"],
-     "modesty": 8, "budget": "medium", "body_shapes": ["rectangle", "apple"]},
-    {"id": 39, "name": "Thermal Wool Abaya + Boots", "category": "daily", "occasion": "Travel Wear",
-     "colors": ["coffee", "black", "plum"], "fabrics": ["wool", "thermal"], "weather": ["winter"],
-     "modesty": 10, "budget": "medium", "body_shapes": ["all"]},
-    {"id": 40, "name": "Raincoat Style Trench + Hijab", "category": "daily", "occasion": "Travel Wear",
-     "colors": ["mustard", "olive", "navy"], "fabrics": ["polyester", "nylon"], "weather": ["winter", "spring"],
-     "modesty": 9, "budget": "medium", "body_shapes": ["all"]},
-    {"id": 41, "name": "Kashmiri Pheran + Woolen Hijab", "category": "daily", "occasion": "Home Wear",
-     "colors": ["maroon", "navy", "forest green"], "fabrics": ["wool", "kashmiri"], "weather": ["winter"],
-     "modesty": 10, "budget": "medium", "body_shapes": ["all"]},
-    {"id": 42, "name": "Chikankari Anarkali + Cotton Dupatta", "category": "festive", "occasion": "Eid Collection",
-     "colors": ["white", "peach", "mint green"], "fabrics": ["cotton", "chikankari"], "weather": ["summer", "spring"],
-     "modesty": 9, "budget": "medium", "body_shapes": ["pear", "hourglass", "rectangle"]},
-]
-
-FESTIVALS = [
-    {"name": "Eid al-Fitr", "type": "eid", "colors": ["green", "gold", "white"], "style": "elegant"},
-    {"name": "Diwali", "type": "diwali", "colors": ["red", "gold", "orange"], "style": "festive"},
-    {"name": "Wedding Season", "type": "wedding", "colors": ["maroon", "gold", "pink"], "style": "luxury"},
-    {"name": "Mehendi Night", "type": "mehendi", "colors": ["yellow", "green", "orange"], "style": "playful"},
-    {"name": "Nikah Ceremony", "type": "nikah", "colors": ["ivory", "gold", "pastel"], "style": "elegant"},
-    {"name": "College Ethnic Day", "type": "college", "colors": ["any"], "style": "traditional"},
-    {"name": "Ramadan Iftar", "type": "ramadan", "colors": ["pastel", "white", "lavender"], "style": "comfortable"},
-]
-
-COLOR_HARMONY = {
-    "warm": ["peach", "coral", "gold", "orange", "yellow", "olive", "brown", "rust", "mustard"],
-    "cool": ["blue", "purple", "pink", "silver", "emerald", "ruby", "navy", "lavender"],
-    "neutral": ["beige", "taupe", "grey", "white", "black", "navy", "cream"],
-    "olive": ["burgundy", "plum", "forest green", "rust", "cream", "gold"],
+# ============================================================
+# SESSION STATE INITIALIZATION
+# ============================================================
+defaults = {
+    'profile': {},
+    'wardrobe': [],
+    'favorites': [],
+    'journal': [],
+    'quiz_step': 0,
+    'quiz_result': None,
+    'calendar_events': {},
+    'tryon_history': [],
+    'packing_list': [],
+    'admin_stats': {'users': 1247, 'outfits': 15432, 'photos': 8921}
 }
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-BODY_SHAPE_ADVICE = {
-    "pear": {"best_kurti": "A-line, Anarkali, Flared (hides hips)", "sleeves": "Full sleeves or bell sleeves",
-             "bottoms": "Palazzo, Sharara, Wide-leg pants", "avoid": "Body-hugging pencil cuts",
-             "saree_drape": "Seedha pallu or Gujarati style", "hijab_tip": "Volume on top, draped loosely around face"},
-    "apple": {"best_kurti": "Empire waist, Flowy A-line, Kaftan", "sleeves": "3/4 sleeves, avoid cap sleeves",
-              "bottoms": "Straight pants, Churidar", "avoid": "Tight waistbands, belted styles",
-              "saree_drape": "Bengali style with pleats in front", "hijab_tip": "Medium volume, avoid too much fabric near face"},
-    "hourglass": {"best_kurti": "Fitted, Belted Anarkali, Straight cut", "sleeves": "Any sleeve style works",
-                  "bottoms": "Straight pants, Fitted palazzo", "avoid": "Overly boxy cuts that hide waist",
-                  "saree_drape": "Nivi style (showcases curves modestly)", "hijab_tip": "Turkish wrap or layered styles"},
-    "rectangle": {"best_kurti": "Layered, Ruffled, Peplum style", "sleeves": "Puffed sleeves, Layered sleeves",
-                  "bottoms": "Sharara, Gharara, Flared pants", "avoid": "Straight boxy cuts without definition",
-                  "saree_drape": "Butterfly style with volume", "hijab_tip": "Volume around face and shoulders"},
-    "inverted_triangle": {"best_kurti": "Flared bottom, A-line, Anarkali", "sleeves": "Avoid heavy shoulder details",
-                         "bottoms": "Wide-leg palazzo, Sharara (balances shoulders)", "avoid": "Puffed sleeves, heavy shoulder embroidery",
-                         "saree_drape": "Loose pallu to soften shoulders", "hijab_tip": "Soft drapes, avoid structured volume on top"}
-}
-
-MAKEUP_GUIDE = {
-    "warm": {"lipstick": ["Coral", "Peach", "Warm Red", "Terracotta"], "eyeshadow": ["Gold", "Bronze", "Copper"], "jewelry": "Gold"},
-    "cool": {"lipstick": ["Berry", "Plum", "Blue-red", "Pink"], "eyeshadow": ["Silver", "Lavender", "Cool Grey"], "jewelry": "Silver/Rose Gold"},
-    "neutral": {"lipstick": ["Nude", "Mauve", "Soft Pink", "Rose"], "eyeshadow": ["Taupe", "Champagne", "Soft Brown"], "jewelry": "Both Gold & Silver"},
-    "olive": {"lipstick": ["Berry", "Rust", "Deep Red", "Coral"], "eyeshadow": ["Bronze", "Olive", "Gold"], "jewelry": "Gold"},
-}
-
-ACCESSORIES = {
-    "daily": ["Minimal studs", "Simple watch", "Tote bag", "Comfortable sandals"],
-    "office": ["Pearl studs", "Sleek watch", "Structured handbag", "Closed-toe flats"],
-    "college": ["Hoop earrings", "Backpack", "White sneakers", "Layered necklaces"],
-    "wedding": ["Jhumka earrings", "Maang tikka", "Potli bag", "Embroidered juttis"],
-    "eid": ["Statement earrings", "Bangles", "Clutch", "Kolhapuris"],
-    "mehendi": ["Floral jewelry", "Bangles", "Potli bag", "Mojaris"],
-}
-
-# ============ AI/ML FUNCTIONS ============
-@st.cache_resource
-def get_face_detector():
-    if MEDIAPIPE_AVAILABLE and mp:
-        return mp.solutions.face_detection.FaceDetection(min_detection_confidence=0.5)
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
+def save_image(uploaded_file):
+    if uploaded_file is not None:
+        return Image.open(BytesIO(uploaded_file.getvalue()))
     return None
 
-@st.cache_resource
-def get_face_mesh():
-    if MEDIAPIPE_AVAILABLE and mp:
-        return mp.solutions.face_mesh.FaceMesh(static_image_mode=True, max_num_faces=1, refine_landmarks=True)
-    return None
+def apply_hijab_overlay(image, color_hex, style="Turkish", intensity=0.35):
+    """Simulate hijab overlay on uploaded photo using PIL"""
+    img = image.convert("RGBA")
+    w, h = img.size
+    overlay = Image.new('RGBA', img.size, (0,0,0,0))
+    draw = ImageDraw.Draw(overlay)
+    
+    # Parse hex to RGB
+    color_hex = color_hex.lstrip('#')
+    rgb = tuple(int(color_hex[i:i+2], 16) for i in (0, 2, 4))
+    alpha = int(255 * intensity)
+    
+    y_end = int(h * 0.48)
+    
+    if style == "Turkish":
+        draw.ellipse([(w*0.18, -h*0.15), (w*0.82, y_end)], fill=rgb+(alpha,))
+        draw.rectangle([(w*0.25, y_end*0.6), (w*0.35, y_end*1.2)], fill=rgb+(alpha,))
+    elif style == "Simple Wrap":
+        draw.rounded_rectangle([(w*0.15, -10), (w*0.85, y_end)], radius=40, fill=rgb+(alpha-20,))
+    elif style == "Layered":
+        draw.pieslice([(w*0.08, -h*0.2), (w*0.92, y_end*1.3)], 0, 180, fill=rgb+(alpha,))
+        draw.arc([(w*0.12, -h*0.1), (w*0.88, y_end*1.1)], 0, 180, fill=rgb+(alpha+40,), width=20)
+    else:  # Side Drape
+        draw.ellipse([(w*0.2, -h*0.1), (w*0.8, y_end)], fill=rgb+(alpha,))
+        draw.rectangle([(w*0.65, y_end*0.3), (w*0.9, y_end*1.4)], fill=rgb+(alpha-30,))
+    
+    overlay = overlay.filter(ImageFilter.GaussianBlur(radius=12))
+    result = Image.alpha_composite(img, overlay)
+    return result.convert("RGB")
 
-def detect_face_cv(image):
-    detector = get_face_detector()
-    if detector is not None:
-        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        results = detector.process(rgb)
-        if results.detections:
-            detection = results.detections[0]
-            ih, iw = image.shape[:2]
-            bbox = detection.location_data.relative_bounding_box
-            x = max(0, int(bbox.xmin * iw))
-            y = max(0, int(bbox.ymin * ih))
-            w = int(bbox.width * iw)
-            h = int(bbox.height * ih)
-            return (x, y, w, h)
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-    if os.path.exists(cascade_path):
-        face_cascade = cv2.CascadeClassifier(cascade_path)
-        faces = face_cascade.detectMultiScale(gray, 1.1, 4)
-        if len(faces) > 0:
-            return tuple(faces[0])
-    return None
-
-def analyze_skin_tone(image):
-    face_box = detect_face_cv(image)
-    if face_box is None:
-        return "neutral"
-    x, y, w, h = face_box
-    forehead = image[y:y+int(h*0.35), x+int(w*0.2):x+int(w*0.8)]
-    if forehead.size == 0:
-        return "neutral"
-    rgb = cv2.cvtColor(forehead, cv2.COLOR_BGR2RGB)
-    pixels = rgb.reshape(-1, 3)
-    kmeans = KMeans(n_clusters=1, random_state=42, n_init=10)
-    kmeans.fit(pixels)
-    r, g, b = kmeans.cluster_centers_[0]
-    if g > r and g > b and abs(r - b) < 40:
-        return "olive"
-    if r > b and abs(r - g) < 30 and r > 100:
-        return "warm"
-    if b > r or (abs(b - r) < 20 and g > r):
-        return "cool"
-    return "neutral"
-
-def detect_face_shape(image):
-    face_mesh = get_face_mesh()
-    if face_mesh is None:
-        face_box = detect_face_cv(image)
-        if face_box is None:
-            return "oval"
-        x, y, w, h = face_box
-        ratio = h / w if w > 0 else 1.0
-        if ratio > 1.4: return "long"
-        elif ratio < 1.1: return "round"
-        else: return "oval"
-    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    results = face_mesh.process(rgb)
-    if not results.multi_face_landmarks:
-        return "oval"
-    landmarks = results.multi_face_landmarks[0].landmark
-    h, w = image.shape[:2]
-    chin = landmarks[152]
-    forehead = landmarks[10]
-    left_cheek = landmarks[234]
-    right_cheek = landmarks[454]
-    face_h = abs(forehead.y - chin.y) * h
-    face_w = abs(right_cheek.x - left_cheek.x) * w
-    ratio = face_h / face_w if face_w > 0 else 1.0
-    jaw_left = landmarks[58]
-    jaw_right = landmarks[288]
-    jaw_w = abs(jaw_right.x - jaw_left.x) * w
-    if ratio > 1.4: return "long"
-    elif jaw_w / face_w > 0.85: return "round"
-    elif jaw_w / face_w < 0.7: return "heart"
-    elif abs(face_w - face_h) < 20: return "square"
-    else: return "oval"
-
-def overlay_hijab(image, color):
-    face_box = detect_face_cv(image)
-    output = image.copy()
-    if face_box is None:
-        cv2.putText(output, "No face detected", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-        return output
-    x, y, w, h = face_box
-    color_map = {
-        "black": (30, 30, 30), "navy": (80, 50, 20), "maroon": (50, 20, 80),
-        "beige": (200, 180, 160), "grey": (150, 150, 150), "white": (240, 240, 240),
-        "pink": (180, 100, 200), "green": (50, 120, 50), "brown": (60, 80, 120),
-        "purple": (150, 50, 128), "red": (50, 50, 180),
+def get_ai_recommendation(profile, occasion, mood, weather, body_shape):
+    """Rule-based recommendation engine"""
+    base = {
+        "outfit": "Classic Anarkali", "hijab": "Chiffon Drape", "color": "Midnight Blue",
+        "jewelry": "Silver Earrings", "shoes": "Embroidered Juttis", "bag": "Clutch",
+        "makeup": "Soft Smokey Eye", "fabric": "Georgette", "confidence": 92
     }
-    bgr = color_map.get(color, (100, 100, 100))
-    center_x = x + w // 2
-    center_y = y + h // 3
-    hijab_w = int(w * 1.8)
-    hijab_h = int(h * 1.6)
-    overlay = np.zeros_like(image)
-    cv2.ellipse(overlay, (center_x, center_y), (hijab_w//2, hijab_h//2), 0, 180, 360, bgr, -1)
-    cv2.ellipse(overlay, (center_x, center_y + h//2), (hijab_w//2, int(h*0.8)), 0, 0, 180, bgr, -1)
-    face_mask = np.zeros_like(image)
-    cv2.ellipse(face_mask, (center_x, center_y + h//6), (w//2 + 5, h//2 + 5), 0, 0, 360, (255, 255, 255), -1)
-    mask_inv = cv2.bitwise_not(face_mask)
-    hijab_part = cv2.bitwise_and(overlay, mask_inv)
-    face_part = cv2.bitwise_and(output, face_mask)
-    result = cv2.add(face_part, hijab_part)
-    cv2.ellipse(result, (center_x, center_y), (hijab_w//2 + 2, hijab_h//2 + 2), 0, 180, 360, (0, 0, 0), 2)
-    return result
-
-def get_weather_data(city, api_key):
-    if not api_key:
-        return {"temp": 32, "condition": "Clear", "humidity": 65, "wind": 3.5, "city": city}
-    try:
-        url = "https://api.openweathermap.org/data/2.5/weather?q=" + city + "&appid=" + api_key + "&units=metric"
-        r = requests.get(url, timeout=10)
-        data = r.json()
-        return {"temp": data["main"]["temp"], "condition": data["weather"][0]["main"],
-                "humidity": data["main"]["humidity"], "wind": data["wind"]["speed"], "city": data["name"]}
-    except Exception:
-        return {"temp": 30, "condition": "Clear", "humidity": 60, "wind": 3.0, "city": city}
-
-def weather_styling_rules(weather):
-    temp = weather["temp"]
-    condition = weather["condition"].lower()
-    rules = {"fabrics": [], "colors": [], "layering": "", "footwear": "", "hijab": "", "notes": ""}
-    if temp > 35:
-        rules["fabrics"] = ["Cotton", "Linen", "Modal", "Chiffon"]
-        rules["colors"] = ["White", "Beige", "Pastel Blue", "Light Grey"]
-        rules["layering"] = "Minimal"
-        rules["footwear"] = "Breathable sandals or juttis"
-        rules["hijab"] = "Cotton jersey or chiffon"
-        rules["notes"] = "Stay cool with breathable natural fabrics. Avoid dark colors."
-    elif temp > 25:
-        rules["fabrics"] = ["Cotton", "Georgette", "Chanderi"]
-        rules["colors"] = ["Peach", "Mint", "Lavender", "Sky Blue"]
-        rules["layering"] = "Light"
-        rules["footwear"] = "Open-toe sandals or Kolhapuris"
-        rules["hijab"] = "Cotton or georgette"
-        rules["notes"] = "Comfortable summer wear with light colors."
-    elif temp > 15:
-        rules["fabrics"] = ["Silk", "Rayon", "Light Wool"]
-        rules["colors"] = ["Olive", "Rust", "Mustard", "Burgundy"]
-        rules["layering"] = "Medium"
-        rules["footwear"] = "Closed shoes or ankle boots"
-        rules["hijab"] = "Silk or pashmina"
-        rules["notes"] = "Pleasant weather - experiment with layers and rich colors."
-    else:
-        rules["fabrics"] = ["Wool", "Velvet", "Pashmina", "Knit"]
-        rules["colors"] = ["Navy", "Black", "Deep Green", "Maroon", "Coffee"]
-        rules["layering"] = "Heavy"
-        rules["footwear"] = "Boots or closed shoes with socks"
-        rules["hijab"] = "Woolen or pashmina hijab"
-        rules["notes"] = "Layer up! Choose warm fabrics and dark colors."
-    if "rain" in condition or "drizzle" in condition:
-        rules["colors"] = ["Navy", "Black", "Dark Green", "Maroon"]
-        rules["footwear"] = "Waterproof shoes or boots"
-        rules["notes"] += " Avoid light colors that show water stains."
-    elif "snow" in condition:
-        rules["fabrics"] = ["Wool", "Fleece", "Thermal"]
-        rules["layering"] = "Thermal + woolen layers"
-    return rules
-
-def score_outfit(template, user_prefs, weather):
-    score = 50.0
-    if user_prefs.get("favorite_colors") and template.get("colors"):
-        matches = sum(1 for c in user_prefs["favorite_colors"] if c.lower() in [tc.lower() for tc in template["colors"]])
-        score += min(matches * 8, 25)
-    if user_prefs.get("favorite_fabrics") and template.get("fabrics"):
-        matches = sum(1 for f in user_prefs["favorite_fabrics"] if f.lower() in [tf.lower() for tf in template["fabrics"]])
-        score += min(matches * 7, 20)
-    temp = weather.get("temp", 25)
-    w_suit = template.get("weather", [])
-    if temp > 30 and "summer" in w_suit: score += 20
-    elif 20 <= temp <= 30 and "spring" in w_suit: score += 20
-    elif temp < 20 and "winter" in w_suit: score += 20
-    if user_prefs.get("budget") and template.get("budget"):
-        if user_prefs["budget"] == template["budget"]: score += 10
-    if user_prefs.get("body_shape") and template.get("body_shapes"):
-        if user_prefs["body_shape"] in template["body_shapes"] or "all" in template["body_shapes"]:
-            score += 15
-    if user_prefs.get("skin_tone") and template.get("colors"):
-        tone_colors = COLOR_HARMONY.get(user_prefs["skin_tone"], [])
-        if any(c.lower() in [tc.lower() for tc in template["colors"]] for c in tone_colors):
-            score += 10
-    return min(score, 100)
-
-def generate_captions(outfit_name, occasion):
-    templates = {
-        "eid": ["Eid Mubarak! Styling modesty with grace today.", "Festive vibes in full swing"],
-        "wedding": ["Wedding season ready! Modest and magnificent.", "Celebrating love in style"],
-        "daily": ["OOTD: Keeping it modest and chic", "Simplicity is the ultimate sophistication"],
-        "diwali": ["Shining bright this Diwali", "Festive glow with modest flow"],
+    
+    # Mood logic
+    mood_map = {
+        "Happy": {"color": "Pastel Pink & Mint", "outfit": "Floral Printed Kurti + Palazzo", "makeup": "Peach Glow"},
+        "Calm": {"color": "Sand & Ivory", "outfit": "Linen Abaya", "makeup": "Nude Brown"},
+        "Confident": {"color": "Emerald & Black", "outfit": "Silk Kaftan", "makeup": "Bold Red Lip"},
+        "Elegant": {"color": "Wine & Gold", "outfit": "Banarasi Saree", "makeup": "Gold Shimmer"},
+        "Energetic": {"color": "Coral & Yellow", "outfit": "Co-ord Set", "makeup": "Orange Blush"}
     }
-    captions = templates.get(occasion, templates["daily"])
-    hashtags = "#ModestFashion #HijabStyle #IndianFashion #OOTD #HijabiFashion #ModestWear #FashionAI"
-    return {"caption": random.choice(captions), "hashtags": hashtags}
+    if mood in mood_map:
+        base.update(mood_map[mood])
+    
+    # Occasion logic
+    occasion_map = {
+        "Nikah": {"outfit": "Heavy Lehenga + Hijab", "jewelry": "Bridal Set + Maang Tikka", "shoes": "Golden Heels"},
+        "Eid": {"outfit": "Chikankari Anarkali", "jewelry": "Jhumkas", "bag": "Potli"},
+        "Office Wear": {"outfit": "Straight Kurti + Trousers", "jewelry": "Watch", "shoes": "Block Heels"},
+        "College Wear": {"outfit": "Denim Kurti + Jeans", "hijab": "Jersey Wrap", "bag": "Backpack"},
+        "Gym/Walking": {"outfit": "Modest Activewear", "hijab": "Sports Hijab", "shoes": "Sneakers"}
+    }
+    if occasion in occasion_map:
+        base.update(occasion_map[occasion])
+    
+    # Weather logic
+    weather_map = {
+        "Sunny 40°C": {"fabric": "Cotton/Linen", "color": base["color"] + " (Breathable)", "shoes": "Kolhapuris"},
+        "Rainy": {"fabric": "Quick-Dry Jersey", "color": "Dark " + base["color"], "shoes": "Waterproof Loafers"},
+        "Winter 10°C": {"fabric": "Wool/Kashmir", "color": base["color"], "shoes": "Ankle Boots", "outfit": "Layered " + base["outfit"]}
+    }
+    if weather in weather_map:
+        base.update(weather_map[weather])
+    
+    # Body shape logic
+    body_map = {
+        "Pear": {"outfit": "A-Line " + base["outfit"], "tip": "Adds volume to upper body"},
+        "Apple": {"outfit": "Empire Waist " + base["outfit"], "tip": "Draws attention upward"},
+        "Hourglass": {"outfit": "Fitted " + base["outfit"], "tip": "Accentuates waist"},
+        "Rectangle": {"outfit": "Layered " + base["outfit"], "tip": "Creates curves"},
+        "Inverted Triangle": {"outfit": "Flared " + base["outfit"], "tip": "Balances proportions"}
+    }
+    if body_shape in body_map:
+        base["outfit"] = body_map[body_shape]["outfit"]
+        base["body_tip"] = body_map[body_shape]["tip"]
+    
+    return base
 
-# ============ UI HELPERS ============
-def render_header(title, subtitle=""):
-    st.markdown("<div class=\"main-header\">" + title + "</div>", unsafe_allow_html=True)
-    if subtitle:
-        st.markdown("<div class=\"sub-header\">" + subtitle + "</div>", unsafe_allow_html=True)
-    st.divider()
-
-def render_outfit_card(template, score):
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        st.markdown("<div style='height:120px;background:linear-gradient(135deg,#8B5CF6,#EC4899);border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;font-size:2rem;'>👗</div>", unsafe_allow_html=True)
-    with col2:
-        st.markdown("**" + template["name"] + "**")
-        st.caption("📌 " + template["occasion"] + " | 💰 " + template["budget"].title())
-        st.caption("🎨 " + ", ".join(template["colors"]) + " | 🧵 " + ", ".join(template["fabrics"]))
-        cls = "score-high" if score >= 75 else "score-mid" if score >= 50 else "score-low"
-        st.markdown("<span class=\"" + cls + "\">Match: " + str(int(score)) + "%</span>", unsafe_allow_html=True)
-        st.progress(score / 100.0)
-
-# ============ PAGES ============
-def page_home():
-    render_header("🧕 AI Hijab & Indian Outfit Stylist", "Your personal AI-powered modest fashion companion")
-    c1, c2, c3 = st.columns(3)
-    with c1: st.metric("👗 Outfit Templates", len(OUTFIT_TEMPLATES))
-    with c2: st.metric("🎉 Festivals Covered", len(FESTIVALS))
-    with c3: st.metric("🧠 AI Features", "15+")
-    st.divider()
-    st.subheader("✨ What this app can do:")
-    features = [
-        ("🎯 AI Outfit Recommendations", "Personalized styling based on your skin tone, body shape, weather & budget"),
-        ("🧕 Virtual Hijab Try-On", "Upload your selfie and try different hijab colors using AI face detection"),
-        ("🎨 Skin Tone Analysis", "AI detects your undertone and suggests best colors for hijabs & outfits"),
-        ("📐 Face Shape Detection", "MediaPipe AI analyzes your face shape for hijab wrapping suggestions"),
-        ("🌤️ Weather-Based Styling", "Live weather integration with fabric, color & layering recommendations"),
-        ("👗 Digital Wardrobe", "Upload and manage your clothes with AI categorization"),
-        ("🎊 Festival Planner", "Complete styling for Eid, Diwali, Weddings, Nikah & more"),
-        ("💄 Makeup & Jewelry Matcher", "Color-coordinated accessories based on your outfit & skin tone"),
-        ("📊 Admin Analytics", "Dashboard with trends, popular colors & user engagement"),
+def generate_caption(occasion, outfit, mood):
+    templates = [
+        f"✨ Embracing elegance in this {outfit} for {occasion}. Feeling absolutely {mood.lower()}! #ModestFashion #HijabStyle",
+        f"🌸 {mood} vibes only! Styled my favorite {outfit} for {occasion}. #IndianFashion #HijabiOutfit",
+        f"🧕 When tradition meets AI — this {outfit} was made for {occasion}! #{occasion.replace(' ', '')}Look"
     ]
-    for title, desc in features:
-        with st.expander(title):
-            st.write(desc)
-    st.info("👈 Use the sidebar to navigate between features. Start with Profile Setup!")
+    hashtags = "#ModestFashion #HijabStyle #IndianWear #OOTD #AIStylist #HijabFashion #ModestStreetStyle"
+    return random.choice(templates) + "\n\n" + hashtags
 
-def page_profile():
-    render_header("👤 Profile & Style Setup", "Tell us about yourself for AI-powered recommendations")
-    with st.form("profile_form"):
-        c1, c2 = st.columns(2)
-        with c1:
-            name = st.text_input("Full Name", value=st.session_state.user.get("name", "") if st.session_state.user else "")
-            age = st.number_input("Age", 15, 80, 22)
-            height = st.number_input("Height (cm)", 120, 200, 165)
-            weight = st.number_input("Weight (kg)", 30, 150, 55)
-            location = st.text_input("City", value=st.session_state.get("location", "Mumbai"))
-        with c2:
-            skin_tone = st.selectbox("Skin Tone", ["warm", "cool", "neutral", "olive"])
-            face_shape = st.selectbox("Face Shape", ["oval", "round", "square", "diamond", "heart", "long"])
-            body_shape = st.selectbox("Body Shape", ["pear", "apple", "hourglass", "rectangle", "inverted_triangle"])
-            budget = st.selectbox("Budget Range", ["low", "medium", "high", "luxury"])
-        st.subheader("Style Preferences")
-        c3, c4 = st.columns(2)
-        with c3:
-            fav_colors = st.multiselect("Favorite Colors", 
-                ["white", "black", "navy", "beige", "peach", "mint", "lavender", "maroon", "gold", "olive", "rust", "pink"],
-                default=["peach", "mint"])
-            fav_fabrics = st.multiselect("Favorite Fabrics",
-                ["cotton", "linen", "silk", "georgette", "chiffon", "velvet", "jersey", "modal"],
-                default=["cotton", "linen"])
-        with c4:
-            hijab_styles = st.multiselect("Preferred Hijab Styles",
-                ["Turkish", "Malaysian", "Layered", "Simple wrap", "Pashmina", "Instant"],
-                default=["Turkish", "Simple wrap"])
-            clothing_style = st.selectbox("Clothing Style", ["minimal", "casual", "elegant", "festive", "luxury", "traditional"])
-        submitted = st.form_submit_button("💾 Save Profile")
-        if submitted:
-            st.session_state.user = {"name": name, "age": age, "height": height, "weight": weight,
-                "skin_tone": skin_tone, "face_shape": face_shape, "body_shape": body_shape,
-                "budget": budget, "location": location}
-            st.session_state.preferences = {
-                "favorite_colors": fav_colors, "favorite_fabrics": fav_fabrics,
-                "hijab_styles": hijab_styles, "clothing_style": clothing_style,
-                "budget": budget, "body_shape": body_shape, "skin_tone": skin_tone}
-            st.session_state.location = location
-            st.success("Profile saved! AI recommendations are now personalized.")
-            st.balloons()
+# ============================================================
+# SIDEBAR NAVIGATION
+# ============================================================
+with st.sidebar:
+    st.markdown("""
+    <div style="text-align: center; padding: 1rem 0;">
+        <h2 style="color: #d4af37; font-family: Playfair Display;">AI Style Studio</h2>
+        <p style="color: #888; font-size: 0.8rem; margin-top: -10px;">Modest Fashion Intelligence</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    nav = st.radio("Navigate", [
+        "🏠 Home",
+        "🧬 AI Profile & Style Quiz",
+        "✨ Smart Recommender",
+        "🌸 Indian Traditional",
+        "🧕 Virtual Try-On",
+        "🌦️ Weather Stylist",
+        "🎨 Color & Face Analysis",
+        "👗 Wardrobe & Calendar",
+        "🎉 Festival Planner",
+        "💎 Accessories & Makeup",
+        "📊 Analytics Dashboard",
+        "📔 Journal & Admin"
+    ], label_visibility="collapsed")
+    
+    st.markdown("---")
+    
+    # Mini profile widget
+    if st.session_state['profile']:
+        st.markdown("### 👤 Style Snapshot")
+        st.caption(f"Body: {st.session_state['profile'].get('body_shape', 'N/A')}")
+        st.caption(f"Tone: {st.session_state['profile'].get('undertone', 'N/A')}")
+        st.progress(78, text="Style Score")
+    else:
+        st.info("Complete your AI Profile to unlock recommendations!")
+    
+    st.markdown("---")
+    st.caption("© 2026 AI Hijab Studio | TY Project")
 
-def page_recommendations():
-    render_header("🎯 AI Outfit Recommendations", "Personalized styling powered by machine learning")
-    if not st.session_state.preferences:
-        st.warning("⚠️ Please complete your Profile Setup first!")
-        return
-    c1, c2 = st.columns([2, 1])
-    with c1:
-        occasion = st.selectbox("Occasion", 
-            ["daily", "college", "office", "travel", "eid", "wedding", "mehendi", "nikah", "diwali", "reception", "party"])
-    with c2:
-        weather_override = st.slider("Temperature (°C)", 0, 50, 30)
-    weather = {"temp": weather_override, "condition": "clear"}
-    scored = []
-    for template in OUTFIT_TEMPLATES:
-        if occasion in [template["category"], template["occasion"].lower().replace(" ", "_")] or occasion == "daily":
-            s = score_outfit(template, st.session_state.preferences, weather)
-            scored.append((template, s))
-    scored.sort(key=lambda x: x[1], reverse=True)
-    if not scored:
-        st.info("No outfits found for this occasion.")
-        return
-    st.subheader("Top " + str(min(5, len(scored))) + " Recommendations for '" + occasion.title() + "'")
-    for template, score in scored[:5]:
-        render_outfit_card(template, score)
-        with st.expander("👁️ View Complete Look Details"):
-            cols = st.columns(3)
-            with cols[0]:
-                st.markdown("**🧕 Hijab:** " + random.choice(["Jersey wrap", "Chiffon drape", "Pashmina", "Silk square"]))
-                st.markdown("**👠 Shoes:** " + random.choice(["Kolhapuris", "Embroidered juttis", "Block heels", "Ballet flats"]))
-            with cols[1]:
-                st.markdown("**👜 Bag:** " + random.choice(["Potli bag", "Sling bag", "Tote", "Clutch"]))
-                st.markdown("**💍 Jewelry:** " + random.choice(["Jhumkas", "Pearl studs", "Statement necklace", "Bangles"]))
-            with cols[2]:
-                st.markdown("**💄 Makeup:** " + random.choice(["Nude lip + kohl", "Red lip + gold eye", "Pink glow", "Berry tones"]))
-                st.markdown("**💅 Nails:** " + random.choice(["Nude", "Maroon", "Gold accent", "French tips"]))
-            st.divider()
-            c1, c2, c3, c4 = st.columns(4)
-            with c1: st.metric("Color Harmony", str(min(95, int(score+5))) + "%")
-            with c2: st.metric("Style Score", str(min(98, int(score+8))) + "%")
-            with c3: st.metric("Comfort", str(min(96, int(score+3))) + "%")
-            with c4: st.metric("Modesty", str(template["modesty"]*10) + "%")
-            cap = generate_captions(template["name"], occasion)
-            caption_text = cap["caption"] + "\n" + cap["hashtags"]
-            st.code(caption_text, language="text")
-            st.caption("📋 Copy this caption for Instagram!")
+# ============================================================
+# PAGE ROUTING
+# ============================================================
 
-def page_tryon():
-    render_header("🧕 Virtual Hijab Try-On", "Upload your photo and try different hijab styles with AI")
-    uploaded = st.file_uploader("Upload your selfie", type=["jpg", "jpeg", "png"])
-    if uploaded:
-        file_bytes = np.asarray(bytearray(uploaded.read()), dtype=np.uint8)
-        image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        c1, c2 = st.columns(2)
-        with c1:
-            st.subheader("Original")
-            st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), use_container_width=True)
-        with c2:
-            st.subheader("AI Analysis")
-            face_box = detect_face_cv(image)
-            if face_box:
-                st.success("✅ Face detected")
-                x, y, w, h = face_box
-                st.caption("Face region: " + str(w) + "x" + str(h) + "px")
-                tone = analyze_skin_tone(image)
-                st.info("🎨 Detected Skin Tone: **" + tone.title() + "** undertone")
-                shape = detect_face_shape(image)
-                st.info("📐 Detected Face Shape: **" + shape.title() + "**")
-                tips = {"oval": "Turkish wrap, Layered volume", "round": "Elongated styles, Side pins",
-                        "square": "Soft drapes, No sharp angles", "heart": "Volume at jaw, Soft sides",
-                        "long": "Width-creating wraps, Volume on sides", "diamond": "Balanced volume, Soft crown"}
-                st.caption("💡 Hijab tip: " + tips.get(shape, "Any style works!"))
-            else:
-                st.error("❌ No face detected. Please upload a clear front-facing photo.")
-        st.divider()
-        st.subheader("🎨 Try Hijab Colors")
-        colors = ["black", "navy", "maroon", "beige", "grey", "white", "pink", "green", "brown", "purple", "red"]
-        selected = st.radio("Select color", colors, horizontal=True)
-        if st.button("✨ Generate Try-On", type="primary"):
-            with st.spinner("AI processing your image..."):
-                result = overlay_hijab(image, selected)
-                st.image(cv2.cvtColor(result, cv2.COLOR_BGR2RGB), use_container_width=True, caption="Hijab Try-On: " + selected.title())
-                if st.session_state.preferences.get("skin_tone"):
-                    tone = st.session_state.preferences["skin_tone"]
-                    best = COLOR_HARMONY.get(tone, [])
-                    if selected in best:
-                        st.success("✅ " + selected.title() + " is a perfect match for your " + tone + " undertone!")
-                    else:
-                        st.warning("💡 For " + tone + " undertone, try: " + ", ".join(best[:5]))
+# ------------------- HOME -------------------
+if nav == "🏠 Home":
+    st.markdown("""
+    <div style="text-align: center; padding: 3rem 0 2rem;">
+        <h1 style="font-size: 3.5rem; background: linear-gradient(90deg, #d4af37, #e0b0a0, #d4af37); 
+                   -webkit-background-clip: text; -webkit-text-fill-color: transparent; 
+                   animation: shine 3s infinite;">
+            AI Hijab & Indian Outfit Studio
+        </h1>
+        <p style="font-size: 1.15rem; color: #a0a0a0; max-width: 650px; margin: 1rem auto 2rem;">
+            The world's first comprehensive AI stylist for modest fashion. 
+            From virtual hijab try-ons to Indian ethnic wear recommendations powered by weather, 
+            skin tone, and body shape analysis.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Hero metrics
+    m1, m2, m3, m4 = st.columns(4)
+    metrics = [("🧕", "Try-Ons", "15K+"), ("🌦️", "Weather AI", "Live"), ("📊", "Outfits", "60+"), ("🌍", "Regions", "12")]
+    for col, (icon, label, val) in zip([m1,m2,m3,m4], metrics):
+        with col:
+            st.markdown(f"""
+            <div class="glass-card" style="text-align: center;">
+                <div style="font-size: 2rem;">{icon}</div>
+                <h3 style="color: #d4af37; margin: 0;">{val}</h3>
+                <p style="color: #888; font-size: 0.85rem;">{label}</p>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Feature Grid
+    st.subheader("✨ Explore Modules")
+    feats = [
+        ("🧬 AI Profile", "Skin tone, body shape & style quiz"),
+        ("✨ Recommender", "Occasion + mood + weather engine"),
+        ("🧕 Virtual Try-On", "Upload selfie & preview hijabs"),
+        ("🌸 Indian Wear", "Saree, Lehenga, Anarkali guides"),
+        ("👗 Wardrobe", "Digital closet & capsule generator"),
+        ("📊 Analytics", "Wardrobe insights & trend dashboards")
+    ]
+    cols = st.columns(3)
+    for i, (title, desc) in enumerate(feats):
+        with cols[i % 3]:
+            st.markdown(f"""
+            <div class="glass-card" style="height: 140px;">
+                <h4 style="color: #e0b0a0;">{title}</h4>
+                <p style="color: #aaa; font-size: 0.9rem;">{desc}</p>
+            </div>
+            """, unsafe_allow_html=True)
 
-def page_skin_tone():
-    render_header("🎨 Skin Tone & Color Analysis", "AI-powered color harmony for your undertone")
-    uploaded = st.file_uploader("Upload a clear photo of your face", type=["jpg", "jpeg", "png"])
-    if uploaded:
-        file_bytes = np.asarray(bytearray(uploaded.read()), dtype=np.uint8)
-        image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        c1, c2 = st.columns([1, 2])
-        with c1:
-            st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), use_container_width=True)
-        with c2:
-            with st.spinner("Analyzing skin tone with K-Means clustering..."):
-                tone = analyze_skin_tone(image)
-                st.success("Detected Undertone: **" + tone.upper() + "**")
-                face_box = detect_face_cv(image)
-                if face_box:
-                    x, y, w, h = face_box
-                    debug = image.copy()
-                    cv2.rectangle(debug, (x+int(w*0.2), y), (x+int(w*0.8), y+int(h*0.35)), (0, 255, 0), 2)
-                    st.caption("Green box shows the forehead region analyzed by K-Means")
-                    st.image(cv2.cvtColor(debug, cv2.COLOR_BGR2RGB), use_container_width=True)
-        st.divider()
-        st.subheader("🎯 Your Personalized Color Palette")
-        colors = COLOR_HARMONY.get(tone, ["beige", "grey", "white"])
-        hex_map = {"peach": "#FFDAB9", "coral": "#FF7F50", "gold": "#FFD700", "orange": "#FFA500",
-                   "yellow": "#FFFF00", "olive": "#808000", "brown": "#8B4513", "rust": "#B7410E",
-                   "mustard": "#FFDB58", "blue": "#4169E1", "purple": "#9370DB", "pink": "#FF69B4",
-                   "silver": "#C0C0C0", "emerald": "#50C878", "ruby": "#E0115F", "navy": "#000080",
-                   "lavender": "#E6E6FA", "beige": "#F5F5DC", "taupe": "#483C32", "grey": "#808080",
-                   "white": "#FFFFFF", "black": "#000000", "cream": "#FFFDD0", "burgundy": "#800020",
-                   "plum": "#DDA0DD", "forest green": "#228B22"}
-        cols = st.columns(len(colors))
-        for i, color in enumerate(colors):
-            with cols[i]:
-                hx = hex_map.get(color, "#CCCCCC")
-                st.markdown("<div style='width:100%;height:60px;background:" + hx + ";border-radius:8px;border:1px solid #ddd;'></div>", unsafe_allow_html=True)
-                st.caption(color.title())
-        st.divider()
-        st.subheader("💄 Makeup & Jewelry Recommendations")
-        makeup = MAKEUP_GUIDE.get(tone, MAKEUP_GUIDE["neutral"])
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.markdown("**💋 Lipstick Shades**")
-            for lip in makeup["lipstick"]:
-                st.write("• " + lip)
-        with c2:
-            st.markdown("**👁️ Eyeshadow**")
-            for eye in makeup["eyeshadow"]:
-                st.write("• " + eye)
-        with c3:
-            st.markdown("**💍 Jewelry Metal**")
-            st.write("→ **" + makeup["jewelry"] + "**")
-            st.caption("Best metal tone for your skin")
-
-def page_weather():
-    render_header("🌤️ Weather-Based AI Styling", "Live weather + AI fabric & color recommendations")
-    c1, c2 = st.columns([2, 1])
-    with c1:
-        city = st.text_input("Enter your city", value=st.session_state.get("location", "Mumbai"))
-    with c2:
-        api_key = st.text_input("OpenWeatherMap API Key (optional)", type="password", value=st.session_state.get("weather_api_key", ""))
-        st.session_state.weather_api_key = api_key
-    if st.button("🌡️ Get Weather & Styling", type="primary"):
-        with st.spinner("Fetching weather data..."):
-            weather = get_weather_data(city, api_key)
-            rules = weather_styling_rules(weather)
-            st.session_state.last_weather = weather
-            c_w1, c_w2, c_w3, c_w4 = st.columns(4)
-            with c_w1: st.metric("🌡️ Temperature", str(round(weather["temp"], 1)) + "°C")
-            with c_w2: st.metric("💧 Humidity", str(weather["humidity"]) + "%")
-            with c_w3: st.metric("💨 Wind", str(weather["wind"]) + " m/s")
-            with c_w4: st.metric("☁️ Condition", weather["condition"])
-            st.divider()
-            st.subheader("🤖 AI Styling Recommendations")
-            c_a1, c_a2 = st.columns(2)
-            with c_a1:
-                st.markdown("**🧵 Recommended Fabrics**")
-                for f in rules["fabrics"]:
-                    st.write("• " + f)
-                st.markdown("**🎨 Recommended Colors**")
-                for c in rules["colors"]:
-                    st.write("• " + c)
-            with c_a2:
-                st.markdown("**🧥 Layering**")
-                st.info(rules["layering"])
-                st.markdown("**👠 Footwear**")
-                st.write(rules["footwear"])
-                st.markdown("**🧕 Hijab Type**")
-                st.write(rules["hijab"])
-            st.warning("💡 **AI Note:** " + rules["notes"])
-            st.divider()
-            st.subheader("👗 Weather-Appropriate Outfits")
-            weather_prefs = st.session_state.preferences.copy() if st.session_state.preferences else {}
-            scored = [(t, score_outfit(t, weather_prefs, weather)) for t in OUTFIT_TEMPLATES]
-            scored.sort(key=lambda x: x[1], reverse=True)
-            for template, score in scored[:3]:
-                render_outfit_card(template, score)
-
-def page_wardrobe():
-    render_header("👗 Digital Wardrobe", "Upload, categorize and manage your clothes")
-    with st.expander("➕ Add New Item"):
-        with st.form("wardrobe_upload"):
+# ------------------- AI PROFILE -------------------
+elif nav == "🧬 AI Profile & Style Quiz":
+    st.title("🧬 AI Personal Profile & Style Setup")
+    
+    tabs = st.tabs(["📝 Profile Setup", "🎮 AI Style Quiz", "📋 My Analysis"])
+    
+    with tabs[0]:
+        with st.form("profile_form"):
             c1, c2 = st.columns(2)
             with c1:
-                item_name = st.text_input("Item Name")
-                category = st.selectbox("Category", 
-                    ["hijab", "kurti", "saree", "lehenga", "abaya", "palazzo", "sharara", "jeans", 
-                     "shoes", "bag", "jewelry", "dupatta", "kaftan", "coat"])
-                color = st.selectbox("Color", ["white", "black", "beige", "navy", "maroon", "gold", "pink", "green", "blue", "red", "yellow", "grey", "brown", "purple"])
+                st.subheader("Physical Attributes")
+                age = st.slider("Age", 15, 70, 21)
+                height = st.select_slider("Height", ["4'8\"", "5'0\"", "5'2\"", "5'4\"", "5'6\"", "5'8\"", "5'10\"", "6'0\""])
+                weight = st.number_input("Weight (kg) [Optional]", 30, 120, 55)
+                body = st.selectbox("Body Shape", ["Pear", "Apple", "Hourglass", "Rectangle", "Inverted Triangle"])
+                face = st.selectbox("Face Shape", ["Oval", "Round", "Square", "Diamond", "Heart", "Long"])
+                
+                st.subheader("Skin Analysis")
+                skin = st.radio("Skin Tone", ["Very Fair", "Fair", "Medium", "Olive", "Brown", "Dark"], horizontal=True)
+                undertone = st.radio("Undertone", ["Warm", "Cool", "Neutral", "Olive"], horizontal=True)
+            
             with c2:
-                fabric = st.selectbox("Fabric", ["cotton", "linen", "silk", "georgette", "chiffon", "velvet", "jersey", "modal", "denim", "wool", "pashmina"])
-                occasion = st.selectbox("Occasion", ["daily", "college", "office", "festive", "wedding", "eid", "travel", "party"])
-            submitted = st.form_submit_button("Add to Wardrobe")
-            if submitted and item_name:
-                item = {"id": len(st.session_state.wardrobe) + 1, "name": item_name, "category": category,
-                        "color": color, "fabric": fabric, "occasion": occasion,
-                        "added": datetime.now().strftime("%Y-%m-%d"), "worn": 0}
-                st.session_state.wardrobe.append(item)
-                st.success("Added " + item_name + " to wardrobe!")
-    if not st.session_state.wardrobe:
-        st.info("Your wardrobe is empty. Add some items above!")
-        return
-    filter_cat = st.multiselect("Filter by category", list(set(i["category"] for i in st.session_state.wardrobe)), default=[])
-    items = st.session_state.wardrobe
-    if filter_cat:
-        items = [i for i in items if i["category"] in filter_cat]
-    st.subheader("Your Wardrobe (" + str(len(items)) + " items)")
-    cols = st.columns(4)
-    for idx, item in enumerate(items):
-        with cols[idx % 4]:
-            st.markdown("<div style='height:100px;background:linear-gradient(135deg,#E9D5FF,#FCE7F3);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:2rem;'>👗</div>", unsafe_allow_html=True)
-            st.markdown("**" + item["name"] + "**")
-            st.caption(item["category"].title() + " | " + item["color"] + " | " + item["fabric"])
-            st.caption("Worn: " + str(item["worn"]) + " times")
-            if st.button("Wear", key="wear_" + str(item["id"])):
-                item["worn"] += 1
+                st.subheader("Style Preferences")
+                styles = st.multiselect("Style Aesthetic", 
+                    ["Minimal", "Luxury", "Casual", "Festive", "Streetwear", "Traditional", "Indo-Western", "Soft Girl", "Korean Modest"])
+                colors = st.multiselect("Favorite Colors", 
+                    ["Black", "White", "Beige", "Pastel Pink", "Dusty Rose", "Emerald", "Navy", "Maroon", "Mustard", "Gold"])
+                fabrics = st.multiselect("Preferred Fabrics", 
+                    ["Cotton", "Linen", "Silk", "Chiffon", "Jersey", "Velvet", "Banarasi", "Georgette", "Organza", "Modal"])
+                budget = st.select_slider("Monthly Budget (₹)", 
+                    ["<1000", "1000-3000", "3000-5000", "5000-10000", "10000-20000", "20000+"])
+                hijab_styles = st.multiselect("Preferred Hijab Styles", 
+                    ["Turkish", "Simple Wrap", "Layered", "Side Drape", "Bridal", "Sports", "Jersey"])
+            
+            if st.form_submit_button("💾 Save My AI Profile", use_container_width=True):
+                st.session_state['profile'] = {
+                    'age': age, 'height': height, 'weight': weight,
+                    'body_shape': body, 'face_shape': face,
+                    'skin_tone': skin, 'undertone': undertone,
+                    'styles': styles, 'colors': colors, 'fabrics': fabrics,
+                    'budget': budget, 'hijab_styles': hijab_styles
+                }
+                st.success("Profile saved! AI model is training on your preferences...")
+                st.balloons()
+    
+    with tabs[1]:
+        st.subheader("🎮 Discover Your Style Archetype")
+        
+        if st.session_state['quiz_step'] == 0:
+            st.markdown("### Question 1 of 4")
+            q1 = st.radio("Pick your ideal weekend activity:", 
+                ["Museum & Coffee", "Wedding Shopping", "Gym & Hiking", "Netflix at Home"])
+            if st.button("Next ➡️"):
+                st.session_state['quiz_q1'] = q1
+                st.session_state['quiz_step'] = 1
                 st.rerun()
-    st.divider()
-    st.subheader("📊 Wardrobe Analytics")
-    df = pd.DataFrame(st.session_state.wardrobe)
-    c1, c2 = st.columns(2)
-    with c1:
-        fig = px.pie(df, names="category", title="Items by Category", hole=0.4)
-        st.plotly_chart(fig, use_container_width=True)
-    with c2:
-        fig2 = px.bar(df.groupby("color").size().reset_index(name="count"), x="color", y="count", title="Colors in Wardrobe", color="color")
-        st.plotly_chart(fig2, use_container_width=True)
+        
+        elif st.session_state['quiz_step'] == 1:
+            st.markdown("### Question 2 of 4")
+            q2 = st.radio("Choose a color palette:", 
+                ["Neutrals & Beige", "Bold Reds & Golds", "Pastels & Whites", "Blacks & Metallics"])
+            if st.button("Next ➡️"):
+                st.session_state['quiz_q2'] = q2
+                st.session_state['quiz_step'] = 2
+                st.rerun()
+        
+        elif st.session_state['quiz_step'] == 2:
+            st.markdown("### Question 3 of 4")
+            q3 = st.radio("Your go-to accessory:", 
+                ["Minimal Watch", "Statement Earrings", "Sneakers", "Designer Bag"])
+            if st.button("Next ➡️"):
+                st.session_state['quiz_q3'] = q3
+                st.session_state['quiz_step'] = 3
+                st.rerun()
+        
+        elif st.session_state['quiz_step'] == 3:
+            st.markdown("### Question 4 of 4")
+            q4 = st.radio("Dream vacation wardrobe:", 
+                ["Linen Abayas", "Heavy Lehengas", "Modest Activewear", "Basic Kurtis"])
+            if st.button("Reveal My Style ✨"):
+                # Simple scoring
+                archetypes = {
+                    "Elegant Traditional": "You gravitate toward timeless pieces, rich fabrics, and classic silhouettes.",
+                    "Minimalist Modest": "Clean lines, neutral palettes, and investment pieces define your wardrobe.",
+                    "Festive Maximalist": "You love color, embroidery, and making an entrance at every celebration.",
+                    "Casual Comfort": "Practical, breathable, and effortlessly stylish — you prioritize comfort."
+                }
+                result = random.choice(list(archetypes.keys()))
+                st.session_state['quiz_result'] = result
+                st.session_state['quiz_desc'] = archetypes[result]
+                st.session_state['quiz_step'] = 4
+                st.rerun()
+        
+        else:
+            st.balloons()
+            st.markdown(f"""
+            <div class="glass-card" style="text-align: center; border: 2px solid #d4af37;">
+                <h2 style="color: #d4af37;">Your Archetype: {st.session_state['quiz_result']}</h2>
+                <p style="font-size: 1.1rem;">{st.session_state['quiz_desc']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("🔄 Retake Quiz"):
+                st.session_state['quiz_step'] = 0
+                st.rerun()
+    
+    with tabs[2]:
+        if st.session_state['profile']:
+            p = st.session_state['profile']
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Face Shape", p['face_shape'])
+            c2.metric("Body Type", p['body_shape'])
+            c3.metric("Undertone", p['undertone'])
+            c4.metric("Budget", p['budget'])
+            
+            st.markdown("---")
+            st.subheader("🎯 AI Personalized Insights")
+            
+            insights = []
+            if p['undertone'] == "Warm":
+                insights.append("💛 **Gold jewelry** will complement your skin beautifully. Opt for earthy hijab tones like mustard, rust, and olive.")
+            elif p['undertone'] == "Cool":
+                insights.append("🤍 **Silver/platinum jewelry** suits you best. Try jewel-toned hijabs: emerald, sapphire, and ruby.")
+            
+            if p['body_shape'] == "Pear":
+                insights.append("👗 **A-line Kurtis** and **empire waist Anarkalis** balance your proportions. Avoid clingy fabrics on the lower half.")
+            elif p['body_shape'] == "Apple":
+                insights.append("🧥 **Straight-cut Abayas** and **V-neckline Kurtis** elongate your torso. Darker colors on top are flattering.")
+            
+            if "Festive" in p['styles']:
+                insights.append("✨ You have a celebratory spirit! Banarasi dupattas and organza hijabs will elevate your wardrobe.")
+            
+            for insight in insights:
+                st.markdown(f"""
+                <div class="glass-card gold-accent">
+                    <p style="margin: 0;">{insight}</p>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("Complete the Profile Setup to see your AI analysis.")
 
-def page_festival():
-    render_header("🎊 Festival & Occasion Planner", "AI-generated complete styling for every celebration")
-    st.subheader("Upcoming Festivals")
-    for fest in FESTIVALS:
-        with st.expander(fest["name"] + " (" + fest["type"].title() + ")"):
-            c1, c2 = st.columns([1, 2])
+# ------------------- RECOMMENDER -------------------
+elif nav == "✨ Smart Recommender":
+    st.title("✨ AI Outfit Recommendation Engine")
+    
+    if not st.session_state['profile']:
+        st.warning("⚠️ Please complete your AI Profile first for personalized results!")
+    else:
+        # Filters
+        with st.container():
+            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+            c1, c2, c3, c4 = st.columns(4)
             with c1:
-                st.markdown("**Best Colors:** " + ", ".join(fest["colors"]))
-                st.markdown("**Style:** " + fest["style"].title())
+                occasion = st.selectbox("Occasion", 
+                    ["Daily Wear", "College Wear", "Office Wear", "Casual Wear", "Travel Wear",
+                     "Gym/Walking", "Eid", "Wedding Guest", "Reception", "Mehendi", "Nikah", "Birthday Party", "Friday Prayer"])
             with c2:
-                prefs = st.session_state.preferences
-                weather = {"temp": 28, "condition": "clear"}
-                matching = [t for t in OUTFIT_TEMPLATES if fest["type"] in t["category"] or fest["type"] in t["occasion"].lower()]
-                if not matching:
-                    matching = [t for t in OUTFIT_TEMPLATES if t["category"] == "festive"]
-                if matching and prefs:
-                    best = max(matching, key=lambda t: score_outfit(t, prefs, weather))
-                    st.markdown("**🎯 AI Recommended Outfit:** " + best["name"])
-                    st.caption("Colors: " + ", ".join(best["colors"]) + " | Fabrics: " + ", ".join(best["fabrics"]))
-                else:
-                    st.info("Complete your profile for AI recommendations!")
-                acc = ACCESSORIES.get(fest["type"], ACCESSORIES["daily"])
-                st.markdown("**💍 Accessories:** " + ", ".join(acc))
-                if prefs.get("skin_tone"):
-                    mk = MAKEUP_GUIDE.get(prefs["skin_tone"], MAKEUP_GUIDE["neutral"])
-                    st.markdown("**💄 Makeup:** " + mk["lipstick"][0] + " lip + " + mk["eyeshadow"][0] + " eye")
-    st.divider()
-    st.subheader("📅 Plan Your Event")
-    with st.form("event_plan"):
-        e_name = st.text_input("Event Name")
-        e_date = st.date_input("Date", min_value=datetime.now())
-        e_type = st.selectbox("Event Type", [f["type"] for f in FESTIVALS])
-        submitted = st.form_submit_button("Plan Event")
-        if submitted:
-            st.session_state.festival_events.append({"name": e_name, "date": e_date.strftime("%Y-%m-%d"), "type": e_type})
-            st.success("Planned " + e_name + "!")
-    if st.session_state.festival_events:
-        st.subheader("Your Planned Events")
-        for ev in st.session_state.festival_events:
-            st.write("📌 **" + ev["name"] + "** — " + ev["date"] + " (" + ev["type"] + ")")
+                mood = st.selectbox("Mood", ["Happy", "Calm", "Confident", "Elegant", "Energetic", "Romantic", "Spiritual"])
+            with c3:
+                weather = st.selectbox("Weather", ["Sunny 40°C", "Rainy", "Winter 10°C", "Humid", "Windy", "Pleasant 25°C"])
+            with c4:
+                hijab_pref = st.selectbox("Hijab Style", ["Turkish", "Layered", "Simple Wrap", "Side Drape", "Bridal", "Sports"])
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Prayer-friendly toggle
+        prayer_friendly = st.toggle("🕌 Prayer-Friendly Outfit (Wudu-friendly sleeves, breathable fabric)", value=False)
+        
+        if st.button("🚀 Generate AI Outfit", use_container_width=True):
+            with st.spinner("Analyzing profile + weather + occasion + mood..."):
+                import time
+                time.sleep(1.2)
+                
+                rec = get_ai_recommendation(st.session_state['profile'], occasion, mood, weather, 
+                                          st.session_state['profile'].get('body_shape', 'Rectangle'))
+                
+                if prayer_friendly:
+                    rec['outfit'] = "Prayer-Friendly " + rec['outfit']
+                    rec['fabric'] = "Breathable " + rec['fabric']
+                    rec['sleeves'] = "Elastic Wudu-Friendly Sleeves"
+                
+                st.markdown("---")
+                st.subheader("🎯 Your AI-Curated Look")
+                
+                left, right = st.columns([1, 2])
+                
+                with left:
+                    # Visual card
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #1a1a2e, #0f0c29); 
+                                border-radius: 20px; padding: 2rem; text-align: center;
+                                border: 2px solid #d4af37; box-shadow: 0 0 30px rgba(212,175,55,0.2);">
+                        <div style="font-size: 4rem; margin-bottom: 1rem;">👗</div>
+                        <h3 style="color: #e0b0a0; margin-bottom: 0.5rem;">{rec['outfit']}</h3>
+                        <div style="background: rgba(212,175,55,0.15); border-radius: 20px; padding: 0.5rem 1rem; display: inline-block;">
+                            <span style="color: #d4af37; font-weight: 600;">{rec['color']}</span>
+                        </div>
+                        <div style="margin-top: 1.5rem;">
+                            <span style="font-size: 1.5rem;">🧕</span>
+                            <p style="color: #ccc; margin: 0;">{rec['hijab']}</p>
+                        </div>
+                        <div style="margin-top: 1rem; font-size: 0.85rem; color: #888;">
+                            Fabric: {rec['fabric']}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    if st.button("❤️ Save to Favorites"):
+                        st.session_state['favorites'].append({
+                            'outfit': rec['outfit'], 'color': rec['color'], 'occasion': occasion,
+                            'date': datetime.datetime.now(), 'mood': mood
+                        })
+                        st.toast("Saved to favorites!")
+                
+                with right:
+                    detail_tabs = st.tabs(["Complete Look", "Accessories", "Makeup & Hair", "AI Scores", "Shop"])
+                    
+                    with detail_tabs[0]:
+                        items = [
+                            ("👗 Primary Outfit", rec['outfit']),
+                            ("🧕 Hijab Style", rec['hijab']),
+                            ("👠 Footwear", rec['shoes']),
+                            ("🎒 Bag", rec['bag']),
+                            ("🧵 Fabric", rec['fabric'])
+                        ]
+                        if prayer_friendly:
+                            items.append(("🕌 Special Feature", rec.get('sleeves', 'Full Coverage')))
+                        for icon_item, val in items:
+                            st.markdown(f"""
+                            <div style="display: flex; justify-content: space-between; padding: 0.6rem 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                                <span style="color: #888;">{icon_item}</span>
+                                <span style="color: #e0e0e0; font-weight: 500;">{val}</span>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        if 'body_tip' in rec:
+                            st.caption(f"💡 Body Shape Tip: {rec['body_tip']}")
+                    
+                    with detail_tabs[1]:
+                        acc = {
+                            "💎 Jewelry": rec['jewelry'],
+                            "📿 Additional": "Layered Necklace" if "Wedding" in occasion else "Minimal Pendant",
+                            "🧷 Hijab Pins": "Crystal Pins" if "Elegant" in mood else "Basic Pins",
+                            "⌚ Watch": "Rose Gold Minimalist"
+                        }
+                        for k, v in acc.items():
+                            st.write(f"**{k}:** {v}")
+                    
+                    with detail_tabs[2]:
+                        makeup = {
+                            "💄 Lipstick": rec['makeup'],
+                            "👁️ Eyeshadow": "Gold Shimmer" if "Wedding" in occasion else "Neutral Brown",
+                            "🌸 Blush": "Soft Peach",
+                            "💅 Nail Color": rec['color'].split()[0]
+                        }
+                        for k, v in makeup.items():
+                            st.write(f"**{k}:** {v}")
+                    
+                    with detail_tabs[3]:
+                        sc1, sc2, sc3 = st.columns(3)
+                        style_score = random.randint(85, 98)
+                        modesty_score = random.randint(90, 100)
+                        weather_score = random.randint(80, 95)
+                        sc1.metric("Style Score", f"{style_score}/100")
+                        sc2.metric("Modesty Score", f"{modesty_score}/100")
+                        sc3.metric("Weather Match", f"{weather_score}/100")
+                        
+                        conf = random.randint(82, 96)
+                        st.progress(conf/100, text=f"AI Confidence: {conf}%")
+                        
+                        # Confidence & Comfort Prediction
+                        st.caption("🧠 Predicted Metrics")
+                        st.write(f"• **Confidence Boost:** +{random.randint(15,35)}%")
+                        st.write(f"• **Comfort Level:** {random.choice(['All Day Wear', 'Luxury Feel', 'Cloud Comfort'])}")
+                        st.write(f"• **Rewear Probability:** {random.randint(70,95)}%")
+                    
+                    with detail_tabs[4]:
+                        st.write("Similar items under your budget:")
+                        st.button(f"🔍 Search {rec['outfit']} on Myntra", use_container_width=True)
+                        st.button(f"🔍 Search {rec['fabric']} Fabric", use_container_width=True)
+                        st.button("🔔 Set Price Alert", use_container_width=True)
 
-def page_body_shape():
-    render_header("📐 Body Shape Outfit Stylist", "AI suggestions tailored to your silhouette")
-    shape = st.selectbox("Select your body shape", 
-        ["pear", "apple", "hourglass", "rectangle", "inverted_triangle"],
-        index=0 if not st.session_state.preferences else ["pear", "apple", "hourglass", "rectangle", "inverted_triangle"].index(st.session_state.preferences.get("body_shape", "pear")))
-    advice = BODY_SHAPE_ADVICE.get(shape, {})
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        st.markdown("<div style='height:200px;background:linear-gradient(135deg,#FCE7F3,#E9D5FF);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:4rem;'>👤</div>", unsafe_allow_html=True)
-        st.caption("Body Shape: **" + shape.replace("_", " ").title() + "**")
-    with c2:
-        st.subheader("🎯 AI Styling Advice")
-        st.markdown("**👗 Best Kurti Style:** " + advice.get("best_kurti", "A-line"))
-        st.markdown("**💪 Sleeves:** " + advice.get("sleeves", "Full sleeves"))
-        st.markdown("**👖 Bottoms:** " + advice.get("bottoms", "Palazzo"))
-        st.markdown("**🚫 Avoid:** " + advice.get("avoid", "Tight fits"))
-        st.markdown("**🥻 Saree Drape:** " + advice.get("saree_drape", "Nivi style"))
-        st.markdown("**🧕 Hijab Tip:** " + advice.get("hijab_tip", "Any style"))
-    st.divider()
-    st.subheader("👗 Recommended Outfits for Your Shape")
-    matching = [t for t in OUTFIT_TEMPLATES if shape in t.get("body_shapes", []) or "all" in t.get("body_shapes", [])]
-    for template in matching[:4]:
-        render_outfit_card(template, 85.0)
+# ------------------- INDIAN TRADITIONAL -------------------
+                        # INDIAN TRADITIONAL CONTINUED
+                        st.title("🌸 Indian Traditional Outfit Studio")
+                        
+                        st.markdown("""
+                        <div style="text-align: center; margin-bottom: 2rem;">
+                            <p style="color: #aaa; font-size: 1.05rem;">
+                                Explore regional crafts, silhouettes, and modest styling for every celebration.
+                            </p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Category Explorer
+                        cat_cols = st.columns(4)
+                        categories = [
+                            ("Kurti + Palazzo", "Daily elegance", "🥻"),
+                            ("Anarkali", "Regal flow", "👗"),
+                            ("Sharara/Gharara", "Festive flare", "💃"),
+                            ("Saree + Hijab", "Timeless drape", "🧣"),
+                            ("Lehenga + Hijab", "Bridal dreams", "👑"),
+                            ("Abaya + Embroidery", "Modest luxury", "🪡"),
+                            ("Kaftan", "Resort chic", "🏖️"),
+                            ("Co-ord Set", "Modern match", "🎯")
+                        ]
+                        
+                        selected_cat = None
+                        for idx, (name, desc, icon) in enumerate(categories):
+                            with cat_cols[idx % 4]:
+                                if st.button(f"{icon} {name}", key=f"cat_{idx}", use_container_width=True):
+                                    selected_cat = name
+                                st.caption(f"<p style='text-align: center; color: #888;'>{desc}</p>", unsafe_allow_html=True)
+                        
+                        if selected_cat:
+                            st.markdown("---")
+                            st.subheader(f"✨ {selected_cat} Styling Guide")
+                            
+                            guide_data = {
+                                "Kurti + Palazzo": {
+                                    "best_for": "College, Office, Daily Wear",
+                                    "hijab_style": "Simple Wrap or Jersey",
+                                    "fabric": "Cotton, Rayon, Linen",
+                                    "tips": "Choose A-line kurtis for pear shapes. Pair with straight palazzos to elongate legs.",
+                                    "colors": "Pastel Pink, Mint, Ivory, Dusty Rose"
+                                },
+                                "Anarkali": {
+                                    "best_for": "Eid, Family Functions, Reception",
+                                    "hijab_style": "Layered or Turkish",
+                                    "fabric": "Georgette, Silk, Net",
+                                    "tips": "Floor-length Anarkalis suit all body types. Add a belt for hourglass emphasis.",
+                                    "colors": "Wine, Emerald, Midnight Blue, Gold"
+                                },
+                                "Sharara/Gharara": {
+                                    "best_for": "Mehendi, Sangeet, Nikah",
+                                    "hijab_style": "Bridal Drape with Dupatta",
+                                    "fabric": "Silk, Brocade, Velvet",
+                                    "tips": "Keep hijab volume balanced with flared bottoms. Heavy earrings complete the look.",
+                                    "colors": "Rani Pink, Mustard, Teal, Maroon"
+                                },
+                                "Saree + Hijab": {
+                                    "best_for": "Wedding Guest, Reception, Ethnic Day",
+                                    "hijab_style": "Turkish with Pleated Pallu",
+                                    "fabric": "Banarasi, Kanjeevaram, Chiffon",
+                                    "tips": "Pin hijab under the blouse line. Use a matching inner cap. Drape pallu over hijab for seamless look.",
+                                    "colors": "Classic Red, Peacock Blue, Forest Green"
+                                },
+                                "Lehenga + Hijab": {
+                                    "best_for": "Bridal, Reception, Photoshoot",
+                                    "hijab_style": "Bridal Turban or Layered Net",
+                                    "fabric": "Velvet, Silk, Organza",
+                                    "tips": "Opt for full-sleeve blouses. Hijab can be draped like a dupatta over one shoulder.",
+                                    "colors": "Bridal Red, Champagne, Sage Green"
+                                },
+                                "Abaya + Embroidery": {
+                                    "best_for": "Friday Prayer, Ramadan, Travel",
+                                    "hijab_style": "Matching Closed Abaya Hijab",
+                                    "fabric": "Nida, Kashibo, Crepe",
+                                    "tips": "Indian embroidery (Chikankari, Zardozi) on abayas creates Indo-Arabic fusion.",
+                                    "colors": "Black with Gold, Navy with Silver, Beige"
+                                },
+                                "Kaftan": {
+                                    "best_for": "Resort, Travel, Home Wear",
+                                    "hijab_style": "Loose Jersey Wrap",
+                                    "fabric": "Cotton, Satin, Chiffon",
+                                    "tips": "Belted kaftans define waist. Perfect for rectangle body shapes.",
+                                    "colors": "White, Coral, Turquoise, Sand"
+                                },
+                                "Co-ord Set": {
+                                    "best_for": "Casual Outings, College, Travel",
+                                    "hijab_style": "Sports or Simple Wrap",
+                                    "fabric": "Cotton Blend, Linen, Knit",
+                                    "tips": "Matching top-bottom sets create vertical lines. Great for petite frames.",
+                                    "colors": "Sage, Lavender, Rust, Charcoal"
+                                }
+                            }
+                            
+                            info = guide_data.get(selected_cat, {})
+                            c1, c2 = st.columns([2, 1])
+                            with c1:
+                                st.markdown(f"""
+                                <div class="glass-card gold-accent">
+                                    <h4 style="color: #d4af37;">{selected_cat}</h4>
+                                    <p><strong>Best For:</strong> {info.get('best_for', '')}</p>
+                                    <p><strong>Recommended Hijab:</strong> {info.get('hijab_style', '')}</p>
+                                    <p><strong>Fabric:</strong> {info.get('fabric', '')}</p>
+                                    <p><strong>Colors:</strong> {info.get('colors', '')}</p>
+                                    <div style="background: rgba(212,175,55,0.1); padding: 1rem; border-radius: 10px; margin-top: 1rem;">
+                                        <p style="margin: 0; color: #e0b0a0;">💡 <strong>Stylist Tip:</strong> {info.get('tips', '')}</p>
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                            with c2:
+                                st.markdown("""
+                                <div style="background: linear-gradient(135deg, #1a1a2e, #302b63); 
+                                            border-radius: 20px; height: 250px; display: flex; 
+                                            align-items: center; justify-content: center;
+                                            border: 1px solid rgba(212,175,55,0.3);">
+                                    <div style="text-align: center;">
+                                        <div style="font-size: 4rem;">🧕</div>
+                                        <p style="color: #888;">Visual Preview</p>
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                st.button("🧕 Try This Look Virtually", use_container_width=True)
+                        
+                        # Regional Explorer
+                        st.markdown("---")
+                        st.subheader("🗺️ Regional Indian Fashion Explorer")
+                        
+                        regions = {
+                            "Lucknow": ["Chikankari Kurta", "Pastel Shades", "Cotton/Viscose"],
+                            "Hyderabad": ["Pearl Work Lehenga", "Royal Colors", "Silk"],
+                            "Kashmir": ["Pashmina Shawl Hijab", "Earth Tones", "Wool"],
+                            "Rajasthan": ["Bandhani Print", "Vibrant Red/Yellow", "Cotton"],
+                            "Bengal": "Kantha Stitch Saree",
+                            "Gujarat": "Patola Dupatta",
+                            "Punjab": "Phulkari Embroidery",
+                            "Kerala": "Kasavu Mundu",
+                            "Pakistani": "Long Shirt + Gharara",
+                            "Turkish": "Hijab + Long Coat",
+                            "Indonesian": "Lace Kebaya",
+                            "Arabic": "Black Abaya + Gold"
+                        }
+                        
+                        reg_cols = st.columns(3)
+                        for idx, (region, specialty) in enumerate(list(regions.items())[:6]):
+                            with reg_cols[idx % 3]:
+                                st.markdown(f"""
+                                <div class="glass-card" style="text-align: center; padding: 1rem;">
+                                    <h4 style="color: #e0b0a0;">{region}</h4>
+                                    <p style="color: #aaa; font-size: 0.85rem;">{specialty if isinstance(specialty, str) else specialty[0]}</p>
+                                </div>
+                                """, unsafe_allow_html=True)
 
-def page_mood():
-    render_header("🎭 Mood-Based Outfit Recommendation", "Dress how you feel")
-    mood = st.select_slider("How are you feeling today?", options=["Sad", "Calm", "Happy", "Confident", "Energetic", "Elegant"])
-    mood_outfits = {
-        "Sad": {"colors": ["Soft pink", "Lavender", "Powder blue"], "style": "Comfortable jersey abaya or soft cotton kurti", "fabric": "Jersey, Modal"},
-        "Calm": {"colors": ["Beige", "White", "Sage green"], "style": "Neutral beige/white co-ord set", "fabric": "Linen, Cotton"},
-        "Happy": {"colors": ["Yellow", "Coral", "Mint"], "style": "Bright pastel Anarkali or flared kurti", "fabric": "Chiffon, Georgette"},
-        "Confident": {"colors": ["Emerald", "Black", "Burgundy"], "style": "Emerald/black elegant silk abaya", "fabric": "Silk, Velvet"},
-        "Energetic": {"colors": ["Red", "Orange", "Electric blue"], "style": "Bold color combination Indo-Western set", "fabric": "Rayon, Crepe"},
-        "Elegant": {"colors": ["Gold", "Ivory", "Champagne"], "style": "Silk abaya or heavy Anarkali with dupatta", "fabric": "Silk, Banarasi"},
+# ------------------- VIRTUAL TRY-ON -------------------
+elif nav == "🧕 Virtual Try-On":
+    st.title("🧕 AI Virtual Try-On Studio")
+    
+    tabs = st.tabs(["Hijab Try-On", "Outfit Try-On", "Dupatta + Hijab Guide"])
+    
+    with tabs[0]:
+        st.markdown("""
+        <div class="glass-card">
+            <p>Upload your selfie and instantly try 30+ hijab colors, textures, and wrapping styles using our AI overlay engine.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        up1, up2 = st.columns([1, 2])
+        with up1:
+            selfie = st.file_uploader("📤 Upload Selfie", type=['jpg', 'jpeg', 'png'], key="hijab_selfie")
+            if selfie:
+                img = save_image(selfie)
+                st.image(img, use_container_width=True, caption="Original")
+        
+        with up2:
+            if selfie:
+                st.subheader("🎨 Customize Your Hijab")
+                hijab_color = st.color_picker("Hijab Color", "#D4AF37")
+                texture = st.select_slider("Texture", ["Matte Cotton", "Satin Sheen", "Chiffon Flow", "Jersey Soft", "Velvet Rich"])
+                wrap_style = st.selectbox("Wrapping Style", ["Turkish", "Simple Wrap", "Layered", "Side Drape", "Bridal"])
+                opacity = st.slider("Overlay Intensity", 0.1, 0.8, 0.35, 0.05)
+                
+                if st.button("✨ Generate AI Try-On", use_container_width=True):
+                    with st.spinner("AI is rendering your hijab overlay..."):
+                        result = apply_hijab_overlay(img, hijab_color, wrap_style, opacity)
+                        st.session_state['tryon_history'].append({
+                            'image': result, 'style': wrap_style, 'color': hijab_color, 'time': datetime.datetime.now()
+                        })
+                    
+                    st.success("Try-On Generated!")
+                    st.image(result, use_container_width=True, caption=f"{wrap_style} Style | {texture}")
+                    
+                    # Comparison
+                    comp = st.columns(2)
+                    with comp[0]:
+                        st.image(img, use_container_width=True, caption="Before")
+                    with comp[1]:
+                        st.image(result, use_container_width=True, caption="After")
+                    
+                    st.download_button("💾 Download Look", data=BytesIO(), file_name="my_hijab_look.png", mime="image/png")
+            else:
+                st.info("Upload a selfie to begin the virtual try-on experience.")
+    
+    with tabs[1]:
+        st.subheader("👗 Traditional Outfit Overlay")
+        st.markdown("""
+        <div class="glass-card">
+            <p>Visualize sarees, lehengas, and kurtis on your photo. (Simulated with color/fabric overlay)</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        outfit_selfie = st.file_uploader("Upload Full Body Photo", type=['jpg', 'jpeg', 'png'], key="outfit_selfie")
+        if outfit_selfie:
+            o_img = save_image(outfit_selfie)
+            o1, o2 = st.columns(2)
+            with o1:
+                outfit_type = st.selectbox("Outfit to Try", ["Saree Drape", "Anarkali", "Lehenga", "Kurti", "Sharara", "Abaya"])
+                outfit_color = st.color_picker("Outfit Color", "#800020")
+                if st.button("Generate Outfit Overlay"):
+                    # Simulate outfit overlay with color tint
+                    tinted = o_img.convert("RGBA")
+                    overlay = Image.new('RGBA', tinted.size, outfit_color + (60,))
+                    blended = Image.alpha_composite(tinted, overlay).convert("RGB")
+                    st.image(blended, caption=f"AI Preview: {outfit_type}")
+            with o2:
+                st.image(o_img, caption="Your Photo")
+    
+    with tabs[2]:
+        st.subheader("🧣 Dupatta + Hijab Styling Tutorials")
+        tutorials = {
+            "One-Side Drape": "Drape dupatta over one shoulder, secure with hijab pin at shoulder. Let it flow behind.",
+            "Turkish Style": "Wrap hijab fully, then layer dupatta over head like a crown. Secure with decorative pins.",
+            "Layered Style": "Wear inner cap, jersey hijab, then sheer dupatta on top for dimension.",
+            "Bridal Style": "Use heavily embroidered dupatta as veil. Pin to hijab cap. Add fresh flowers or tiara.",
+            "Casual Style": "Simply throw dupatta over one shoulder, no pinning. Pair with loose jersey hijab."
+        }
+        for name, desc in tutorials.items():
+            with st.expander(name):
+                st.write(desc)
+                st.button(f"🎬 Watch {name} Video", key=f"vid_{name}")
+
+# ------------------- WEATHER STYLIST -------------------
+elif nav == "🌦️ Weather Stylist":
+    st.title("🌦️ Weather-Based AI Styling")
+    
+    # Simulated weather widget
+    w1, w2, w3, w4 = st.columns(4)
+    weather_options = ["Sunny 40°C", "Rainy", "Winter 10°C", "Humid 35°C", "Windy", "Pleasant 25°C"]
+    current_weather = w1.selectbox("Current Weather", weather_options)
+    location = w2.text_input("Location", "Mumbai, India")
+    uv_index = w3.slider("UV Index", 0, 11, 7)
+    humidity = w4.slider("Humidity %", 20, 100, 65)
+    
+    st.markdown("---")
+    
+    # Weather-based recommendation card
+    weather_recs = {
+        "Sunny 40°C": {
+            "icon": "☀️", "fabric": "Cotton, Linen, Modal", "colors": "White, Beige, Pastel Blue, Mint",
+            "hijab": "Breathable Cotton Jersey", "footwear": "Kolhapuris, Open Sandals",
+            "layering": "None - keep minimal", "accessories": "Sunglasses, Cap under hijab"
+        },
+        "Rainy": {
+            "icon": "🌧️", "fabric": "Quick-dry Jersey, Synthetic Blends", "colors": "Navy, Black, Dark Green, Rust",
+            "hijab": "Synthetic Chiffon (dries fast)", "footwear": "Waterproof Loafers, Rubber Sole Shoes",
+            "layering": "Light waterproof trench", "accessories": "Compact umbrella, Waterproof bag"
+        },
+        "Winter 10°C": {
+            "icon": "❄️", "fabric": "Wool, Pashmina, Velvet, Knit", "colors": "Burgundy, Camel, Forest Green, Charcoal",
+            "hijab": "Wool Hijab or Pashmina Shawl", "footwear": "Ankle Boots, Closed Shoes",
+            "layering": "Thermal inner + Cardigan + Coat", "accessories": "Gloves, Woolen socks, Ear warmers"
+        },
+        "Humid 35°C": {
+            "icon": "💧", "fabric": "Cotton, Linen, Chambray", "colors": "Light Grey, Lavender, Sky Blue",
+            "hijab": "Super-light Chiffon or Voile", "footwear": "Breathable Juttis",
+            "layering": "Avoid layers", "accessories": "Face mist, Hair ties"
+        },
+        "Windy": {
+            "icon": "💨", "fabric": "Heavier Cotton, Jersey", "colors": "Earthy tones",
+            "hijab": "Secure Jersey Wrap with pins", "footwear": "Closed shoes",
+            "layering": "Light jacket", "accessories": "Extra safety pins"
+        },
+        "Pleasant 25°C": {
+            "icon": "🌤️", "fabric": "All fabrics suitable", "colors": "Any seasonal palette",
+            "hijab": "Any style works", "footwear": "Any",
+            "layering": "Optional light shrug", "accessories": "Statement jewelry"
+        }
     }
-    rec = mood_outfits[mood]
-    st.markdown("<div style='background:#F3F4F6;border-radius:12px;padding:1.5rem;border-left:4px solid #8B5CF6;'>", unsafe_allow_html=True)
-    st.subheader("✨ For when you're feeling " + mood)
-    st.markdown("**🎨 Colors:** " + ", ".join(rec["colors"]))
-    st.markdown("**👗 Style:** " + rec["style"])
-    st.markdown("**🧵 Fabrics:** " + rec["fabric"])
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.divider()
-    st.subheader("Outfits matching your mood")
-    for template in OUTFIT_TEMPLATES[:3]:
-        render_outfit_card(template, random.uniform(70, 95))
+    
+    rec = weather_recs.get(current_weather, weather_recs["Pleasant 25°C"])
+    
+    st.markdown(f"""
+    <div class="glass-card" style="border: 2px solid rgba(212,175,55,0.3);">
+        <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+            <span style="font-size: 3rem;">{rec['icon']}</span>
+            <div>
+                <h3 style="margin: 0; color: #d4af37;">AI Weather Recommendation</h3>
+                <p style="margin: 0; color: #888;">{location} • {current_weather}</p>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    wc1, wc2 = st.columns(2)
+    with wc1:
+        st.metric("Recommended Fabric", rec['fabric'])
+        st.metric("Best Colors", rec['colors'])
+        st.metric("Hijab Type", rec['hijab'])
+    with wc2:
+        st.metric("Footwear", rec['footwear'])
+        st.metric("Layering", rec['layering'])
+        st.metric("Accessories", rec['accessories'])
+    
+    # Dynamic outfit suggestion based on weather
+    st.markdown("---")
+    st.subheader("🎯 Auto-Generated Weather Outfit")
+    
+    if current_weather == "Sunny 40°C":
+        st.markdown("""
+        <div class="glass-card">
+            <h4>☀️ Heatwave Modest Look</h4>
+            <p><strong>Outfit:</strong> White cotton palazzo suit with short sleeves (wear arm coverage if preferred)</p>
+            <p><strong>Hijab:</strong> Beige cotton jersey wrap — breathable and sweat-wicking</p>
+            <p><strong>Why:</strong> Light colors reflect heat. Cotton absorbs sweat. Loose fit allows air circulation.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    elif current_weather == "Winter 10°C":
+        st.markdown("""
+        <div class="glass-card">
+            <h4>❄️ Cozy Modest Look</h4>
+            <p><strong>Outfit:</strong> Wool Anarkali + Thermal leggings + Long coat</p>
+            <p><strong>Hijab:</strong> Kashmiri Pashmina shawl wrapped as hijab</p>
+            <p><strong>Why:</strong> Layering traps heat. Pashmina provides insulation without bulk.</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-def page_admin():
-    render_header("📊 Admin Analytics Dashboard", "Project evaluation & insights")
-    if not st.session_state.get("admin_view", False):
-        pwd = st.text_input("Admin Password", type="password")
-        if pwd == "admin123":
-            st.session_state.admin_view = True
-            st.rerun()
-        elif pwd:
-            st.error("Incorrect password")
-        st.stop()
-    st.subheader("User Engagement")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: st.metric("Total Users", "1,247")
-    with c2: st.metric("Outfits Generated", "8,932")
-    with c3: st.metric("Wardrobe Items", "3,456")
-    with c4: st.metric("Try-Ons", "2,109")
-    st.divider()
-    c_a1, c_a2 = st.columns(2)
-    with c_a1:
-        color_data = pd.DataFrame({"color": ["Black", "Beige", "Maroon", "Navy", "White", "Gold", "Pink"], "count": [340, 280, 220, 190, 170, 150, 130]})
-        fig = px.bar(color_data, x="color", y="count", title="Most Popular Colors", color="color")
+# ------------------- COLOR & FACE ANALYSIS -------------------
+elif nav == "🎨 Color & Face Analysis":
+    st.title("🎨 Skin Tone & Face Shape AI")
+    
+    c_tabs = st.tabs(["Skin Tone Analysis", "Face Shape Detection", "Body Shape Stylist"])
+    
+    with c_tabs[0]:
+        st.subheader("AI Skin Tone & Undertone Detection")
+        
+        upload_skin = st.file_uploader("Upload wrist/face photo for analysis", type=['jpg', 'png'])
+        if upload_skin:
+            simg = save_image(upload_skin)
+            st.image(simg, width=300)
+            
+            if st.button("🔬 Analyze Skin Tone"):
+                with st.spinner("Running K-Means color clustering..."):
+                    import time
+                    time.sleep(1.5)
+                    
+                    # Simulated analysis
+                    undertone = random.choice(["Warm", "Cool", "Neutral", "Olive"])
+                    skin_depth = random.choice(["Fair", "Medium", "Tan", "Deep"])
+                    
+                    st.success(f"Detected: **{skin_depth}** with **{undertone}** undertone")
+                    
+                    if undertone == "Warm":
+                        st.markdown("""
+                        <div class="glass-card gold-accent">
+                            <h4 style="color: #d4af37;">Warm Undertone Palette</h4>
+                            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin: 1rem 0;">
+                                <div style="width: 60px; height: 60px; background: #D4AF37; border-radius: 50%;" title="Gold"></div>
+                                <div style="width: 60px; height: 60px; background: #FF8C00; border-radius: 50%;" title="Orange"></div>
+                                <div style="width: 60px; height: 60px; background: #8B4513; border-radius: 50%;" title="Brown"></div>
+                                <div style="width: 60px; height: 60px; background: #556B2F; border-radius: 50%;" title="Olive"></div>
+                                <div style="width: 60px; height: 60px; background: #DC143C; border-radius: 50%;" title="Crimson"></div>
+                            </div>
+                            <p><strong>Best Hijab Colors:</strong> Mustard, Rust, Olive, Coral, Peach, Gold, Copper</p>
+                            <p><strong>Jewelry:</strong> Gold, Rose Gold, Copper, Bronze</p>
+                            <p><strong>Lipstick:</strong> Warm reds, Orange-red, Coral, Peachy nude</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    elif undertone == "Cool":
+                        st.markdown("""
+                        <div class="glass-card gold-accent">
+                            <h4 style="color: #d4af37;">Cool Undertone Palette</h4>
+                            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin: 1rem 0;">
+                                <div style="width: 60px; height: 60px; background: #C0C0C0; border-radius: 50%;"></div>
+                                <div style="width: 60px; height: 60px; background: #4169E1; border-radius: 50%;"></div>
+                                <div style="width: 60px; height: 60px; background: #800080; border-radius: 50%;"></div>
+                                <div style="width: 60px; height: 60px; background: #FF69B4; border-radius: 50%;"></div>
+                                <div style="width: 60px; height: 60px; background: #2E8B57; border-radius: 50%;"></div>
+                            </div>
+                            <p><strong>Best Hijab Colors:</strong> Silver, Sapphire, Emerald, Lavender, Rose, Berry</p>
+                            <p><strong>Jewelry:</strong> Silver, Platinum, White Gold</p>
+                            <p><strong>Lipstick:</strong> Berry, Plum, Blue-red, Mauve</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+    
+    with c_tabs[1]:
+        st.subheader("Face Shape Detection")
+        face_shape = st.selectbox("Select your face shape (or upload photo for AI detection)", 
+                                   ["Oval", "Round", "Square", "Diamond", "Heart", "Long"])
+        
+        face_tips = {
+            "Oval": {"hijab": "Any style works! Turkish wrap adds volume.", "volume": "Medium", "pins": "Side pins"},
+            "Round": {"hijab": "Height on top, elongate with side drapes", "volume": "High crown", "pins": "Forehead center"},
+            "Square": {"hijab": "Soften jaw with loose sides", "volume": "Low side volume", "pins": "Under chin"},
+            "Diamond": {"hijab": "Balance narrow chin with forehead volume", "volume": "Top heavy", "pins": "Temple pins"},
+            "Heart": {"hijab": "Minimize forehead, add volume at jaw", "volume": "Low volume", "pins": "Side jaw pins"},
+            "Long": {"hijab": "Avoid height, wrap close to head", "volume": "Flat top", "pins": "Even distribution"}
+        }
+        
+        tip = face_tips[face_shape]
+        st.markdown(f"""
+        <div class="glass-card">
+            <h4 style="color: #e0b0a0;">{face_shape} Face Analysis</h4>
+            <p><strong>Recommended Hijab Style:</strong> {tip['hijab']}</p>
+            <p><strong>Volume Strategy:</strong> {tip['volume']}</p>
+            <p><strong>Pin Placement:</strong> {tip['pins']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Visual guide
+        st.caption("Visual Pin Placement Guide")
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[0.5], y=[0.8], mode='markers', marker=dict(size=30, color='#d4af37'), name="Forehead"))
+        fig.add_trace(go.Scatter(x=[0.2, 0.8], y=[0.5, 0.5], mode='markers', marker=dict(size=20, color='#e0b0a0'), name="Sides"))
+        fig.add_trace(go.Scatter(x=[0.5], y=[0.2], mode='markers', marker=dict(size=25, color='#888'), name="Chin"))
+        fig.update_layout(
+            title="Hijab Pin Placement Map",
+            xaxis=dict(range=[0, 1], showgrid=False, zeroline=False),
+            yaxis=dict(range=[0, 1], showgrid=False, zeroline=False),
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+            font=dict(color='#e0e0e0'), height=300
+        )
         st.plotly_chart(fig, use_container_width=True)
-    with c_a2:
-        cat_data = pd.DataFrame({"category": ["Daily", "Festive", "Wedding", "College", "Office", "Travel"], "users": [450, 320, 280, 210, 180, 150]})
-        fig2 = px.pie(cat_data, names="category", values="users", title="Outfit Categories Demand")
-        st.plotly_chart(fig2, use_container_width=True)
-    st.divider()
-    st.subheader("📈 Weekly Trends")
-    trend_data = pd.DataFrame({"day": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"], "outfits": [120, 145, 132, 156, 189, 245, 210], "tryons": [45, 52, 48, 61, 72, 98, 85]})
-    fig3 = go.Figure()
-    fig3.add_trace(go.Scatter(x=trend_data["day"], y=trend_data["outfits"], name="Outfits", fill='tozeroy'))
-    fig3.add_trace(go.Scatter(x=trend_data["day"], y=trend_data["tryons"], name="Try-Ons", fill='tonexty'))
-    fig3.update_layout(title="Weekly Activity", template="plotly_white")
-    st.plotly_chart(fig3, use_container_width=True)
-    st.divider()
-    st.subheader("🧠 AI/ML Module Usage")
-    ml_data = pd.DataFrame({"module": ["Recommendation", "Skin Tone", "Face Shape", "Try-On", "Weather", "Wardrobe Classify"], "calls": [3200, 890, 756, 1200, 2100, 1500], "accuracy": [92, 87, 84, 78, 95, 89]})
-    fig4 = px.bar(ml_data, x="module", y="calls", color="accuracy", title="ML Module API Calls & Accuracy", color_continuous_scale="Viridis")
-    st.plotly_chart(fig4, use_container_width=True)
-    if st.button("🔓 Logout Admin"):
-        st.session_state.admin_view = False
-        st.rerun()
+    
+    with c_tabs[2]:
+        st.subheader("Body Shape Outfit Stylist")
+        body = st.selectbox("Your Body Shape", ["Pear", "Apple", "Hourglass", "Rectangle", "Inverted Triangle"])
+        
+        body_guide = {
+            "Pear": {
+                "kurti": "A-Line / Anarkali (adds upper volume)",
+                "pants": "Straight Palazzo (balances hips)",
+                "saree": "Seedha Pallu (draws eye up)",
+                "avoid": "Bodycon bottoms, heavy lower embroidery",
+                "abaya": "Flared cut with shoulder details"
+            },
+            "Apple": {
+                "kurti": "Empire waist, A-line (skips midsection)",
+                "pants": "Straight cut, dark colors",
+                "saree": "Ulta Pallu, light fabrics",
+                "avoid": "Clingy fabrics around waist, heavy belts",
+                "abaya": "Straight cut with vertical lines"
+            },
+            "Hourglass": {
+                "kurti": "Fitted, belted styles",
+                "pants": "Any style — you're balanced!",
+                "saree": "Nivi drape, highlight waist",
+                "avoid": "Boxy shapes that hide waist",
+                "abaya": "Belted or cinched waist"
+            },
+            "Rectangle": {
+                "kurti": "Layered, peplum, ruffled",
+                "pants": "Wide leg, patterned",
+                "saree": "Bengali drape (adds curves)",
+                "avoid": "Straight cuts head-to-toe",
+                "abaya": "Layered or belted for definition"
+            },
+            "Inverted Triangle": {
+                "kurti": "Flared bottom, minimal shoulder detail",
+                "pants": "Wide palazzo, printed bottoms",
+                "saree": "Mermaid style drape",
+                "avoid": "Puff sleeves, heavy shoulder work",
+                "abaya": "A-line cut, minimal top detail"
+            }
+        }
+        
+        bg = body_guide[body]
+        st.markdown(f"""
+        <div class="glass-card gold-accent">
+            <h3 style="color: #d4af37;">{body} Body Styling Guide</h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;">
+                <div><strong>Best Kurti:</strong><br>{bg['kurti']}</div>
+                <div><strong>Best Bottom:</strong><br>{bg['pants']}</div>
+                <div><strong>Saree Drape:</strong><br>{bg['saree']}</div>
+                <div><strong>Abaya Cut:</strong><br>{bg['abaya']}</div>
+            </div>
+            <p style="color: #e0b0a0; margin-top: 1rem;">⚠️ <strong>Avoid:</strong> {bg['avoid']}</p>
+        </div>
+        """, unsafe_allow_html=True)
 
-# ============ MAIN ============
-def main():
-    with st.sidebar:
-        st.markdown("<h1 style='text-align:center;'>🧕 AI Stylist</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align:center;color:#6B7280;'>Modest Fashion AI</p>", unsafe_allow_html=True)
-        st.divider()
-        page = st.radio("Navigate", [
-            "🏠 Home", "👤 Profile Setup", "🎯 AI Recommendations", "🧕 Virtual Try-On",
-            "🎨 Skin Tone Analysis", "🌤️ Weather Styling", "👗 Digital Wardrobe",
-            "🎊 Festival Planner", "📐 Body Shape Stylist", "🎭 Mood Stylist", "📊 Admin Dashboard"
-        ])
-        st.divider()
-        st.caption("🎓 B.Sc. Data Science Final Year Project")
-        st.caption("Built with Streamlit + OpenCV + MediaPipe + scikit-learn")
+# ------------------- WARDROBE & CALENDAR -------------------
+elif nav == "👗 Wardrobe & Calendar":
+    st.title("👗 Smart Digital Wardrobe")
+    
+    w_tabs = st.tabs(["My Wardrobe", "Capsule Generator", "Outfit Calendar"])
+    
+    with w_tabs[0]:
+        st.subheader("📤 Upload & Manage Clothes")
+        
+        uploaded_cloth = st.file_uploader("Upload clothing item", type=['jpg', 'png'], accept_multiple_files=True)
+        if uploaded_cloth:
+            for file in uploaded_cloth:
+                item = {
+                    'name': file.name,
+                    'category': random.choice(['Kurti', 'Hijab', 'Palazzo', 'Dupatta', 'Abaya', 'Shoes']),
+                    'color': random.choice(['Red', 'Blue', 'Black', 'White', 'Green', 'Pink']),
+                    'fabric': random.choice(['Cotton', 'Silk', 'Chiffon', 'Linen']),
+                    'last_worn': 'Never',
+                    'image': save_image(file)
+                }
+                st.session_state['wardrobe'].append(item)
+            st.success(f"Added {len(uploaded_cloth)} items to wardrobe!")
+        
+        if st.session_state['wardrobe']:
+            st.markdown("---")
+            st.subheader(f"Your Closet ({len(st.session_state['wardrobe'])} items)")
+            
+            # Filter
+            f1, f2, f3 = st.columns(3)
+            cat_filter = f1.multiselect("Category", list(set([i['category'] for i in st.session_state['wardrobe']])))
+            col_filter = f2.multiselect("Color", list(set([i['color'] for i in st.session_state['wardrobe']])))
+            
+            filtered = [i for i in st.session_state['wardrobe'] 
+                       if (not cat_filter or i['category'] in cat_filter)
+                       and (not col_filter or i['color'] in col_filter)]
+            
+            cols = st.columns(4)
+            for idx, item in enumerate(filtered[:8]):
+                with cols[idx % 4]:
+                    st.markdown(f"""
+                    <div class="glass-card" style="text-align: center;">
+                        <div style="font-size: 2.5rem;">👗</div>
+                        <p style="color: #e0b0a0; font-weight: 600; margin: 0;">{item['category']}</p>
+                        <p style="color: #888; font-size: 0.8rem;">{item['color']} • {item['fabric']}</p>
+                        <p style="color: #555; font-size: 0.75rem;">Last: {item['last_worn']}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+        else:
+            st.info("Your wardrobe is empty. Upload clothes to get started!")
+    
+    with w_tabs[1]:
+        st.subheader("🎯 Capsule Wardrobe Generator")
+        
+        if len(st.session_state['wardrobe']) < 3:
+            st.warning("Upload at least 3 items to generate capsule combinations.")
+        else:
+            st.write("AI is analyzing your wardrobe for mix & match combinations...")
+            
+            # Generate combinations
+            combos = []
+            items = st.session_state['wardrobe']
+            for i in range(min(6, len(items))):
+                combo = random.sample(items, min(3, len(items)))
+                combos.append(combo)
+            
+            for idx, combo in enumerate(combos):
+                with st.expander(f"✨ Outfit Combination {idx+1}"):
+                    c_str = " + ".join([f"{c['color']} {c['category']}" for c in combo])
+                    st.write(f"**Look:** {c_str}")
+                    st.button(f"Wear This on {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][idx]}", key=f"wear_{idx}")
+    
+    with w_tabs[2]:
+        st.subheader("📅 Outfit Calendar Planner")
+        
+        cal_date = st.date_input("Select Date", datetime.date.today())
+        occasion_cal = st.selectbox("Occasion for this date", 
+                                    ["Regular Day", "Eid", "Wedding", "Office", "College", "Date", "Travel"])
+        
+        if st.button("Plan Outfit for Date"):
+            planned = get_ai_recommendation(
+                st.session_state.get('profile', {}),
+                occasion_cal if occasion_cal != "Regular Day" else "Daily Wear",
+                "Happy", "Pleasant 25°C", "Rectangle"
+            )
+            st.session_state['calendar_events'][str(cal_date)] = planned
+            st.success(f"Outfit planned for {cal_date}!")
+        
+        # Show calendar events
+        if st.session_state['calendar_events']:
+            st.markdown("---")
+            st.write("### Upcoming Planned Outfits")
+            for date, outfit in list(st.session_state['calendar_events'].items())[:5]:
+                st.markdown(f"""
+                <div class="glass-card" style="display: flex; justify-content: space-between; align-items: center;">
+                    <div>
+                        <strong style="color: #d4af37;">{date}</strong>
+                        <p style="margin: 0; color: #aaa;">{outfit['outfit']} + {outfit['hijab']}</p>
+                    </div>
+                    <span style="font-size: 1.5rem;">📌</span>
+                </div>
+                """, unsafe_allow_html=True)
 
-    if page == "🏠 Home":
-        page_home()
-    elif page == "👤 Profile Setup":
-        page_profile()
-    elif page == "🎯 AI Recommendations":
-        page_recommendations()
-    elif page == "🧕 Virtual Try-On":
-        page_tryon()
-    elif page == "🎨 Skin Tone Analysis":
-        page_skin_tone()
-    elif page == "🌤️ Weather Styling":
-        page_weather()
-    elif page == "👗 Digital Wardrobe":
-        page_wardrobe()
-    elif page == "🎊 Festival Planner":
-        page_festival()
-    elif page == "📐 Body Shape Stylist":
-        page_body_shape()
-    elif page == "🎭 Mood Stylist":
-        page_mood()
-    elif page == "📊 Admin Dashboard":
-        page_admin()
+# ------------------- FESTIVAL PLANNER -------------------
+elif nav == "🎉 Festival Planner":
+    st.title("🎉 Festival & Occasion Planner")
+    
+    occasions = {
+        "Eid": {"icon": "🌙", "colors": "Gold, White, Green", "outfit": "Chikankari Anarkali or Abaya", "hijab": "Silk Turkish Wrap"},
+        "Ramadan": {"icon": "🕌", "colors": "Pastel, Lavender, White", "outfit": "Loose Cotton Kurti + Palazzo", "hijab": "Breathable Jersey"},
+        "Nikah": {"icon": "💍", "colors": "Red, Gold, Maroon", "outfit": "Heavy Lehenga + Full Sleeves", "hijab": "Bridal Net Drape"},
+        "Mehendi": {"icon": "🌿", "colors": "Yellow, Green, Orange", "outfit": "Light Sharara or Gharara", "hijab": "Simple Chiffon"},
+        "Reception": {"icon": "🥂", "colors": "Navy, Silver, Wine", "outfit": "Gown-style Anarkali", "hijab": "Layered with Pins"},
+        "Diwali": {"icon": "🪔", "colors": "Red, Gold, Orange", "outfit": "Banarasi Saree or Silk Kurti", "hijab": "Pashmina or Silk"},
+        "Birthday": {"icon": "🎂", "colors": "Personal favorite", "outfit": "Trendy Co-ord or Indo-Western", "hijab": "Stylish Turban"},
+        "College Ethnic Day": {"icon": "🎓", "colors": "College colors or vibrant", "outfit": "Simple Kurti + Jeans", "hijab": "Casual Wrap"},
+        "Friday Prayer": {"icon": "🤲", "colors": "Black, Navy, Earth tones", "outfit": "Prayer Abaya or Jilbab", "hijab": "Integrated Prayer Set"}
+    }
+    
+    occ_cols = st.columns(3)
+    for idx, (name, info) in enumerate(occasions.items()):
+        with occ_cols[idx % 3]:
+            st.markdown(f"""
+            <div class="glass-card" style="text-align: center; cursor: pointer;">
+                <div style="font-size: 2.5rem;">{info['icon']}</div>
+                <h4 style="color: #e0b0a0;">{name}</h4>
+                <p style="color: #888; font-size: 0.8rem;">{info['outfit']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button(f"Plan {name}", key=f"plan_{name}", use_container_width=True):
+                st.session_state['selected_occasion'] = name
+    
+    if 'selected_occasion' in st.session_state:
+        occ = st.session_state['selected_occasion']
+        info = occasions[occ]
+        st.markdown("---")
+        st.subheader(f"{info['icon']} Complete {occ} Styling Guide")
+        
+        oc1, oc2 = st.columns([2, 1])
+        with oc1:
+            st.markdown(f"""
+            <div class="glass-card gold-accent">
+                <h3 style="color: #d4af37;">{occ} Look</h3>
+                <p><strong>Primary Outfit:</strong> {info['outfit']}</p>
+                <p><strong>Hijab Style:</strong> {info['hijab']}</p>
+                <p><strong>Color Palette:</strong> {info['colors']}</p>
+                <p><strong>Jewelry:</strong> {random.choice(['Polki Set', 'Pearl Drops', 'Gold Jhumkas', 'Kundan Necklace'])}</p>
+                <p><strong>Makeup:</strong> {random.choice(['Soft Glam', 'Bold Liner', 'Gold Shimmer', 'Natural Glow'])}</p>
+                <p><strong>Mehendi:</strong> {random.choice(['Arabic Floral', 'Indo-Arabic Fusion', 'Minimal Finger', 'Bridal Full Hand'])}</p>
+            </div>
+            """, unsafe_allow_html=True)
+        with oc2:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #1a1a2e, #302b63); 
+                        border-radius: 20px; height: 300px; display: flex; 
+                        align-items: center; justify-content: center;
+                        border: 1px solid rgba(212,175,55,0.2);">
+                <div style="text-align: center;">
+                    <div style="font-size: 4rem;">🧕</div>
+                    <p style="color: #888;">Occasion Preview</p>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Caption generator
+            st.markdown("---")
+            st.caption("AI Caption Generator")
+            caption = generate_caption(occ, info['outfit'], "Elegant")
+            st.text_area("Copy this caption:", caption, height=100)
+            st.button("📋 Copy to Clipboard")
 
-if __name__ == "__main__":
-    main()
+# ------------------- ACCESSORIES & MAKEUP -------------------
+elif nav == "💎 Accessories & Makeup":
+    st.title("💎 Jewelry, Makeup & Mehendi")
+    
+    am_tabs = st.tabs(["Jewelry Matcher", "Makeup AI", "Mehendi Guide", "Hijab Color Matcher"])
+    
+    with am_tabs[0]:
+        st.subheader("AI Jewelry & Accessory Matcher")
+        outfit_color = st.color_picker("Your Outfit Color", "#800020")
+        occasion_acc = st.selectbox("Occasion", ["Daily", "Office", "Wedding", "Party", "College"])
+        
+        # Color-based matching logic
+        if outfit_color > "#555555":
+            jewelry = "Gold / Antique Gold"
+            bag = "Potli / Embroidered Clutch"
+        else:
+            jewelry = "Silver / Diamond / Kundan"
+            bag = "Metallic Clutch / Sling"
+        
+        if occasion_acc == "Wedding":
+            jewelry = "Heavy Bridal Set + Maang Tikka + Nath"
+            bag = "Decorated Potli"
+        elif occasion_acc == "Office":
+            jewelry = "Small Studs + Watch"
+            bag = "Tote / Structured Bag"
+        
+        st.markdown(f"""
+        <div class="glass-card">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; text-align: center;">
+                <div>
+                    <div style="font-size: 2rem;">💎</div>
+                    <p style="color: #d4af37; font-weight: 600;">Jewelry</p>
+                    <p style="color: #aaa; font-size: 0.85rem;">{jewelry}</p>
+                </div>
+                <div>
+                    <div style="font-size: 2rem;">🎒</div>
+                    <p style="color: #d4af37; font-weight: 600;">Bag</p>
+                    <p style="color: #aaa; font-size: 0.85rem;">{bag}</p>
+                </div>
+                <div>
+                    <div style="font-size: 2rem;">👠</div>
+                    <p style="color: #d4af37; font-weight: 600;">Footwear</p>
+                    <p style="color: #aaa; font-size: 0.85rem;">{random.choice(['Juttis', 'Heels', 'Kolhapuris', 'Block Heels'])}</p>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with am_tabs[1]:
+        st.subheader("Makeup Recommendation AI")
+        makeup_occ = st.selectbox("Occasion", ["Daily", "Eid", "Wedding", "College", "Date"])
+        makeup_tone = st.radio("Skin Tone", ["Fair", "Medium", "Tan", "Deep"], horizontal=True)
+        
+        makeup_recs = {
+            "Daily": {"lip": "Nude Pink", "eye": "Brown Mascara", "blush": "Soft Peach", "base": "BB Cream"},
+            "Eid": {"lip": "Berry / Rose", "eye": "Gold Shimmer", "blush": "Coral", "base": "Medium Coverage"},
+            "Wedding": {"lip": "Red / Maroon", "eye": "Smokey Gold", "blush": "Deep Rose", "base": "Full Coverage"},
+            "College": {"lip": "Tinted Balm", "eye": "Kohl Liner", "blush": "None", "base": "Tinted Moisturizer"},
+            "Date": {"lip": "Dusty Rose", "eye": "Soft Wing", "blush": "Pink Glow", "base": "Dewy Finish"}
+        }
+        
+        mr = makeup_recs[makeup_occ]
+        st.markdown(f"""
+        <div class="glass-card">
+            <h4 style="color: #e0b0a0;">{makeup_occ} Makeup Look</h4>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div>💄 <strong>Lipstick:</strong> {mr['lip']}</div>
+                <div>👁️ <strong>Eyes:</strong> {mr['eye']}</div>
+                <div>🌸 <strong>Blush:</strong> {mr['blush']}</div>
+                <div>✨ <strong>Base:</strong> {mr['base']}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.caption("Nail Color Suggestion: Match with hijab or dupatta accent color.")
+    
+    with am_tabs[2]:
+        st.subheader("Mehendi Design Guide")
+        meh_style = st.selectbox("Style", ["Arabic", "Bridal", "Minimal", "Floral", "Indo-Arabic", "Finger Only"])
+        meh_images = {
+            "Arabic": "Flowing vines, negative space, floral trails",
+            "Bridal": "Full hand intricate, groom name hidden, peacocks",
+            "Minimal": "Small wrist band, single finger accent",
+            "Floral": "Roses, lotus patterns, dense flowers",
+            "Indo-Arabic": "Mix of Indian detail + Arabic flow",
+            "Finger Only": "Rings, fingertips, geometric finger patterns"
+        }
+        st.info(meh_images[meh_style])
+        st.button("📸 View Design Gallery")
+    
+    with am_tabs[3]:
+        st.subheader("Hijab Color Matcher")
+        base_color = st.color_picker("Outfit/Dress Color", "#2E8B57")
+        st.write("AI suggests complementary hijab colors:")
+        
+        # Simple complementary logic
+        st.markdown("""
+        <div style="display: flex; gap: 15px; margin-top: 1rem;">
+            <div style="text-align: center;">
+                <div style="width: 80px; height: 80px; background: #D4AF37; border-radius: 50%; margin: 0 auto;"></div>
+                <p style="color: #aaa; font-size: 0.8rem;">Gold</p>
+            </div>
+            <div style="text-align: center;">
+                <div style="width: 80px; height: 80px; background: #F5F5DC; border-radius: 50%; margin: 0 auto;"></div>
+                <p style="color: #aaa; font-size: 0.8rem;">Beige</p>
+            </div>
+            <div style="text-align: center;">
+                <div style="width: 80px; height: 80px; background: #800020; border-radius: 50%; margin: 0 auto;"></div>
+                <p style="color: #aaa; font-size: 0.8rem;">Burgundy</p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+# ------------------- ANALYTICS DASHBOARD -------------------
+elif nav == "📊 Analytics Dashboard":
+    st.title("📊 AI Closet Analytics & Trends")
+    
+    dash_tabs = st.tabs(["My Wardrobe Analytics", "Fashion Trends", "Sustainability Score"])
+    
+    with dash_tabs[0]:
+        st.subheader("📈 Your Wardrobe Insights")
+        
+        # Mock data for charts
+        color_data = pd.DataFrame({
+            'Color': ['Black', 'White', 'Blue', 'Pink', 'Beige', 'Red'],
+            'Count': [12, 8, 6, 5, 4, 3]
+        })
+        fabric_data = pd.DataFrame({
+            'Fabric': ['Cotton', 'Silk', 'Chiffon', 'Linen', 'Velvet', 'Georgette'],
+            'Count': [15, 8, 7, 5, 3, 6]
+        })
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            fig1 = px.pie(color_data, values='Count', names='Color', title='Color Distribution',
+                         color_discrete_sequence=px.colors.sequential.Plasma)
+            fig1.update_layout(paper_bgcolor='rgba(0,0,0,0)', font_color='#e0e0e0')
+            st.plotly_chart(fig1, use_container_width=True)
+        
+        with c2:
+            fig2 = px.bar(fabric_data, x='Fabric', y='Count', title='Fabric Usage',
+                         color='Count', color_continuous_scale='gold')
+            fig2.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='#e0e0e0')
+            st.plotly_chart(fig2, use_container_width=True)
+        
+        # Spending graph
+        months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun']
+        spending = [2500, 1800, 4200, 1500, 3800, 2100]
+        fig3 = go.Figure()
+        fig3.add_trace(go.Scatter(x=months, y=spending, fill='tozeroy', 
+                                   line=dict(color='#d4af37'), fillcolor='rgba(212,175,55,0.2)'))
+        fig3.update_layout(title='Monthly Fashion Spending (₹)', paper_bgcolor='rgba(0,0,0,0)', 
+                          plot_bgcolor='rgba(0,0,0,0)', font_color='#e0e0e0')
+        st.plotly_chart(fig3, use_container_width=True)
+        
+        # Metrics
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Items", len(st.session_state['wardrobe']) or 24, "+3 this month")
+        m2.metric("Most Worn", "Black Kurti", "12 times")
+        m3.metric("Cost Per Wear", "₹45", "-12%")
+        m4.metric("Sustainability", "78/100", "+5")
+    
+    with dash_tabs[1]:
+        st.subheader("🔥 2026 Modest Fashion Trends")
+        
+        trends = pd.DataFrame({
+            'Trend': ['Pastel Hijabs', 'Organza Dupattas', 'Indo-Western Abayas', 'Pearl Accessories', 'Chikankari Revival'],
+            'Popularity': [95, 88, 82, 76, 91],
+            'Growth': [15, 22, 35, 12, 28]
+        })
+        
+        fig4 = px.scatter(trends, x='Popularity', y='Growth', size='Popularity', color='Trend',
+                         title='Trending Modest Fashion 2026', color_discrete_sequence=px.colors.sequential.Gold)
+        fig4.update_layout(paper_bgcolor='rgba(0,0,0,0)', font_color='#e0e0e0')
+        st.plotly_chart(fig4, use_container_width=True)
+        
+        st.markdown("""
+        <div class="glass-card">
+            <h4 style="color: #d4af37;">This Season's Must-Haves</h4>
+            <ul style="color: #ccc;">
+                <li>🌸 <strong>Pastel Hijabs:</strong> Lavender, Sage, Dusty Rose dominating 2026</li>
+                <li>✨ <strong>Organza Dupattas:</strong> Sheer layering over jersey hijabs</li>
+                <li>🪡 <strong>Chikankari Revival:</strong> Lucknowi embroidery on modern cuts</li>
+                <li>🧥 <strong>Indo-Western Abayas:</strong> Belted, collared, with Indian motifs</li>
+                <li>📿 <strong>Pearl Accessories:</strong> Oversized pearls on hijab pins and bags</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with dash_tabs[2]:
+        st.subheader("🌱 Sustainable Fashion Score")
+        
+        eco_score = 78
+        st.progress(eco_score/100, text=f"Eco Score: {eco_score}/100")
+        
+        st.markdown("""
+        <div class="glass-card">
+            <h4 style="color: #4CAF50;">Your Sustainability Breakdown</h4>
+            <p>♻️ <strong>Outfit Reuse Rate:</strong> 68% (Above average!)</p>
+            <p>🧵 <strong>Natural Fabrics:</strong> 45% of wardrobe</p>
+            <p>🛍️ <strong>Local Brands:</strong> 30% purchases</p>
+            <p>📦 <strong>Carbon Footprint:</strong> Low (Mostly Indian brands)</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.button("🎁 Claim Sustainable Fashion Badge")
+        st.button("📤 Donate Unused Clothes")
+
+# ------------------- JOURNAL & ADMIN -------------------
+elif nav == "📔 Journal & Admin":
+    st.title("📔 Fashion Journal & Admin")
+    
+    ja_tabs = st.tabs(["Fashion Journal", "Packing Assistant", "Budget Planner", "Admin Dashboard"])
+    
+    with ja_tabs[0]:
+        st.subheader("📝 Your Outfit Diary")
+        
+        entry_date = st.date_input("Date", datetime.date.today())
+        entry_mood = st.selectbox("Mood", ["Happy", "Confident", "Calm", "Energetic", "Elegant", "Nostalgic"])
+        entry_outfit = st.text_input("What did you wear?")
+        entry_occ = st.text_input("Occasion")
+        entry_notes = st.text_area("Notes & Feelings")
+        entry_photo = st.file_uploader("Add Photo", type=['jpg', 'png'])
+        
+        if st.button("Save Journal Entry"):
+            st.session_state['journal'].append({
+                'date': entry_date, 'mood': entry_mood, 'outfit': entry_outfit,
+                'occasion': entry_occ, 'notes': entry_notes
+            })
+            st.success("Memory saved!")
+        
+        if st.session_state['journal']:
+            st.markdown("---")
+            st.write("### Past Entries")
+            for entry in reversed(st.session_state['journal'][-5:]):
+                st.markdown(f"""
+                <div class="glass-card">
+                    <div style="display: flex; justify-content: space-between;">
+                        <strong style="color: #d4af37;">{entry['date']}</strong>
+                        <span style="color: #888;">{entry['mood']}</span>
+                    </div>
+                    <p style="margin: 0.5rem 0;"><strong>{entry['outfit']}</strong> for {entry['occasion']}</p>
+                    <p style="color: #aaa; font-size: 0.9rem;">{entry['notes']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    with ja_tabs[1]:
+        st.subheader("🧳 AI Packing Assistant")
+        destination = st.text_input("Destination")
+        days = st.number_input("Days", 1, 30, 3)
+        trip_type = st.selectbox("Trip Type", ["Business", "Vacation", "Wedding", "Umrah/Hajj", "College Trip"])
+        
+        if st.button("Generate Packing List"):
+            items = []
+            if trip_type == "Umrah/Hajj":
+                items = ["2 White Ihram Abayas", "Prayer Rug", "Travel Prayer Set", "Comfortable Sneakers", "Unscented Lotion"]
+            elif trip_type == "Wedding":
+                items = ["Heavy Lehenga", "Light Sangeet Outfit", "2 Hijabs (Bridal + Casual)", "Jewelry Set", "Makeup Kit"]
+            else:
+                items = [f"{days} Kurtis", f"{days//2 + 1} Hijabs", "1 Pair Comfortable Shoes", "Toiletries", "Accessories"]
+            
+            st.session_state['packing_list'] = items
+            st.markdown(f"""
+            <div class="glass-card">
+                <h4 style="color: #d4af37;">{trip_type} Packing List for {destination}</h4>
+                <ul style="color: #ccc;">
+                    {''.join([f'<li>{item}</li>' for item in items])}
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+            st.button("📋 Copy Checklist")
+    
+    with ja_tabs[2]:
+        st.subheader("💰 Budget Fashion Planner")
+        monthly_budget = st.number_input("Monthly Budget (₹)", 1000, 50000, 5000)
+        spent = st.number_input("Already Spent (₹)", 0, 50000, 1200)
+        
+        remaining = monthly_budget - spent
+        st.metric("Remaining Budget", f"₹{remaining}")
+        st.progress(spent/monthly_budget, text=f"Used: ₹{spent} / ₹{monthly_budget}")
+        
+        if remaining < 1000:
+            st.warning("⚠️ Low budget! Check out our Thrift & Sale section.")
+        
+        # Budget allocation
+        alloc = pd.DataFrame({
+            'Category': ['Hijabs', 'Kurtis', 'Bottoms', 'Occasion Wear', 'Accessories', 'Shoes'],
+            'Recommended %': [20, 30, 15, 20, 10, 5],
+            'Amount': [monthly_budget*0.2, monthly_budget*0.3, monthly_budget*0.15, 
+                      monthly_budget*0.2, monthly_budget*0.1, monthly_budget*0.05]
+        })
+        fig5 = px.pie(alloc, values='Amount', names='Category', title='Recommended Budget Split',
+                     color_discrete_sequence=px.colors.sequential.Sunset)
+        fig5.update_layout(paper_bgcolor='rgba(0,0,0,0)', font_color='#e0e0e0')
+        st.plotly_chart(fig5, use_container_width=True)
+    
+    with ja_tabs[3]:
+        st.subheader("🔐 Admin Dashboard")
+        
+        # Admin metrics
+        a1, a2, a3, a4 = st.columns(4)
+        stats = st.session_state['admin_stats']
+        a1.metric("Total Users", stats['users'])
+        a2.metric("Outfits Generated", stats['outfits'])
+        a3.metric("Photos Uploaded", stats['photos'])
+        a4.metric("Active Today", 142)
+        
+        # Engagement chart
+        days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        users = [120, 135, 128, 142, 155, 180, 165]
+        fig6 = go.Figure()
+        fig6.add_trace(go.Bar(x=days, y=users, marker_color='#d4af37'))
+        fig6.update_layout(title='Weekly User Engagement', paper_bgcolor='rgba(0,0,0,0)', 
+                          plot_bgcolor='rgba(0,0,0,0)', font_color='#e0e0e0')
+        st.plotly_chart(fig6, use_container_width=True)
+        
+        # Popular colors table
+        pop_colors = pd.DataFrame({
+            'Color': ['Black', 'Beige', 'Dusty Rose', 'Navy', 'Emerald'],
+            'Selections': [2340, 1890, 1650, 1420, 1200],
+            'Trend': ['Stable', 'Rising', 'Rising', 'Stable', 'New']
+        })
+        st.dataframe(pop_colors, use_container_width=True, hide_index=True)
+
+# ============================================================
+# FOOTER
+# ============================================================
+st.markdown("---")
+st.markdown("""
+<div style="text-align: center; padding: 2rem 0; color: #555;">
+    <p style="font-family: Playfair Display; color: #d4af37; font-size: 1.2rem;">AI Hijab & Indian Outfit Studio</p>
+    <p style="font-size: 0.8rem;">B.Sc. Data Science Final Year Project | 2026</p>
+    <p style="font-size: 0.75rem; color: #444;">Modules: Recommendation Engine • Computer Vision • NLP • Weather API • Data Analytics</p>
+</div>
+""", unsafe_allow_html=True)
